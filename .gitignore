@@ -30,3 +30,6 @@ outputs/
 # Sistema operativo
 .DS_Store
 Thumbs.db
+
+# Archivos adicionales
+Paper base_Compiler Error Messages Considered Unhelpful.pdf
