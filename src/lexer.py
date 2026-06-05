@@ -17,36 +17,87 @@ _PATRONES_SIMBOLO = [
     re.compile(r'"(?P<simbolo>[^"]+)"'),         # cualquier cosa entre comillas dobles
 ]
 
+_TIPOS_C = {
+    "auto",
+    "char",
+    "char *",
+    "const",
+    "double",
+    "enum",
+    "extern",
+    "float",
+    "int",
+    "long",
+    "register",
+    "short",
+    "signed",
+    "static",
+    "struct",
+    "typedef",
+    "union",
+    "unsigned",
+    "void",
+    "volatile",
+}
+
 # Patrones para clasificar el tipo de error a partir del mensaje
 _PATRONES_TIPO = [
-    (re.compile(r'undeclared|not declared|undefined'),          'undeclared'),
-    (re.compile(r"expected\s+'?[^']+'?\s+before"),              'expected_token'),
-    (re.compile(r'implicit declaration'),                       'implicit_declaration'),
-    (re.compile(r'incompatible type|cannot convert'),           'type_mismatch'),
-    (re.compile(r'too (few|many) argument'),                    'wrong_arguments'),
-    (re.compile(r'unused variable|unused parameter'),           'unused_variable'),
-    (re.compile(r'return type|return value'),                   'return_error'),
-    (re.compile(r'redeclar|redefinit'),                         'redeclaration'),
-    (re.compile(r'divide|division by zero'),                    'division_by_zero'),
+    (re.compile(r'undeclared|not declared|undefined', re.IGNORECASE), 'undeclared'),
+    (re.compile(r"expected\s+.+\s+before", re.IGNORECASE),            'expected_token'),
+    (re.compile(r'implicit declaration', re.IGNORECASE),              'implicit_declaration'),
+    (
+        re.compile(
+            r'incompatible type|cannot convert|makes integer from pointer|without a cast',
+            re.IGNORECASE,
+        ),
+        'type_mismatch',
+    ),
+    (re.compile(r'too (few|many) argument', re.IGNORECASE),           'wrong_arguments'),
+    (re.compile(r'unused variable|unused parameter', re.IGNORECASE),  'unused_variable'),
+    (
+        re.compile(
+            r'return type|return value|return.*with a value|function returning void',
+            re.IGNORECASE,
+        ),
+        'return_error',
+    ),
+    (re.compile(r'redeclar|redefinit', re.IGNORECASE),                'redeclaration'),
+    (re.compile(r'divide|division by zero', re.IGNORECASE),           'division_by_zero'),
 ]
 
 
 def _extraer_simbolo(mensaje: str) -> str | None:
     for patron in _PATRONES_SIMBOLO:
         m = patron.search(mensaje)
-        if m:
+        if m and m.group('simbolo') not in _TIPOS_C:
             return m.group('simbolo')
     return None
 
 
 def _clasificar_tipo(mensaje: str) -> str:
     for patron, tipo in _PATRONES_TIPO:
-        if patron.search(mensaje, re.IGNORECASE):
+        if patron.search(mensaje):
             return tipo
     return 'desconocido'
 
 
-def _tokenizar_linea(linea: str) -> list[Token]:
+def _extraer_variable_de_declaracion(linea_fuente: str | None) -> str | None:
+    if not linea_fuente:
+        return None
+
+    antes_asignacion = linea_fuente.split("=", 1)[0]
+    m = re.search(r'\b(?P<variable>[A-Za-z_][A-Za-z0-9_]*)\s*$', antes_asignacion)
+    if not m:
+        return None
+
+    variable = m.group("variable")
+    if variable in _TIPOS_C:
+        return None
+
+    return variable
+
+
+def _tokenizar_linea(linea: str, linea_fuente: str | None = None) -> list[Token]:
     """Convierte una línea del stderr de GCC en una lista de tokens."""
     linea = linea.strip()
     if not linea:
@@ -73,7 +124,14 @@ def _tokenizar_linea(linea: str) -> list[Token]:
         Token(TokenType.TIPO_ERROR,    _clasificar_tipo(m.group('mensaje'))),
     ]
 
-    simbolo = _extraer_simbolo(m.group('mensaje'))
+    tipo_error = tokens[-1].valor
+    simbolo = None
+    if tipo_error == "type_mismatch":
+        simbolo = _extraer_variable_de_declaracion(linea_fuente)
+
+    if not simbolo:
+        simbolo = _extraer_simbolo(m.group('mensaje'))
+
     if simbolo:
         tokens.append(Token(TokenType.SIMBOLO, simbolo))
 
@@ -109,8 +167,19 @@ class Lexer:
         if not self.stderr_crudo:
             self.compilar_y_capturar()
 
+        lineas_fuente = []
+        if self.ruta_archivo.exists():
+            lineas_fuente = self.ruta_archivo.read_text(encoding="utf-8").splitlines()
+
         self.tokens = []
         for linea in self.stderr_crudo.splitlines():
-            self.tokens.extend(_tokenizar_linea(linea))
+            linea_fuente = None
+            m = _PATRON_GCC.match(linea.strip())
+            if m:
+                numero_linea = int(m.group("linea"))
+                if 1 <= numero_linea <= len(lineas_fuente):
+                    linea_fuente = lineas_fuente[numero_linea - 1]
+
+            self.tokens.extend(_tokenizar_linea(linea, linea_fuente))
 
         return self.tokens

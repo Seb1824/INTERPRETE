@@ -1,4 +1,5 @@
 import os
+import pytest
 from src.lexer import Lexer
 from src.token import TokenType
 
@@ -61,3 +62,77 @@ def test_lexer_retorna_desconocido_para_linea_no_parseable():
     tokens = _tokenizar_linea("linea inventada sin formato gcc")
     assert len(tokens) == 1
     assert tokens[0].tipo == TokenType.DESCONOCIDO
+
+
+def _tipo_error_desde_linea(linea: str) -> str:
+    from src.lexer import _tokenizar_linea
+
+    tokens = _tokenizar_linea(linea)
+    tipo_error = next(t for t in tokens if t.tipo == TokenType.TIPO_ERROR)
+    return tipo_error.valor
+
+
+def test_lexer_clasifica_expected_token_real_de_gcc():
+    linea = "examples\\error_lexico.c:6:5: error: expected ',' or ';' before 'return'"
+    assert _tipo_error_desde_linea(linea) == "expected_token"
+
+
+def test_lexer_clasifica_type_mismatch_real_de_gcc():
+    linea = (
+        "examples\\error_lexico.c:5:13: warning: initialization of 'int' "
+        "from 'char *' makes integer from pointer without a cast [-Wint-conversion]"
+    )
+    assert _tipo_error_desde_linea(linea) == "type_mismatch"
+
+
+def test_lexer_clasifica_unused_variable_real_de_gcc():
+    linea = "examples\\error_lexico.c:5:9: warning: unused variable 'z' [-Wunused-variable]"
+    assert _tipo_error_desde_linea(linea) == "unused_variable"
+
+
+def test_lexer_no_usa_tipo_c_como_simbolo():
+    from src.lexer import _tokenizar_linea
+
+    linea = (
+        "examples\\error_lexico.c:5:13: warning: initialization of 'int' "
+        "from 'char *' makes integer from pointer without a cast [-Wint-conversion]"
+    )
+    tokens = _tokenizar_linea(linea)
+    simbolos = [t.valor for t in tokens if t.tipo == TokenType.SIMBOLO]
+
+    assert "int" not in simbolos
+
+
+def test_lexer_extrae_variable_de_declaracion_en_type_mismatch():
+    from src.lexer import _tokenizar_linea
+
+    linea = (
+        "examples\\error_lexico.c:5:13: warning: initialization of 'int' "
+        "from 'char *' makes integer from pointer without a cast [-Wint-conversion]"
+    )
+    tokens = _tokenizar_linea(linea, linea_fuente='    int z = "hola"')
+    simbolo = next(t.valor for t in tokens if t.tipo == TokenType.SIMBOLO)
+
+    assert simbolo == "z"
+
+
+@pytest.mark.parametrize(
+    ("archivo", "tipo_esperado"),
+    [
+        ("variable_no_declarada.c", "undeclared"),
+        ("falta_punto_y_coma.c", "expected_token"),
+        ("tipo_incompatible.c", "type_mismatch"),
+        ("funcion_implicita.c", "implicit_declaration"),
+        ("argumentos_incorrectos.c", "wrong_arguments"),
+        ("variable_no_usada.c", "unused_variable"),
+        ("redeclaracion.c", "redeclaration"),
+        ("division_por_cero.c", "division_by_zero"),
+        ("retorno_incorrecto.c", "return_error"),
+    ],
+)
+def test_examples_generan_tipo_esperado(archivo, tipo_esperado):
+    ruta = os.path.join(os.path.dirname(__file__), "..", "examples", archivo)
+    tokens = Lexer(ruta).tokenizar()
+    tipos = [t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR]
+
+    assert tipo_esperado in tipos
