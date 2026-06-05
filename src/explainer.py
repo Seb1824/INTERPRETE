@@ -156,6 +156,51 @@ def _explain_return_error(entry):
     }
 
 
+def _explain_unused_variable(entry):
+    simbolo = entry.simbolo or "una variable"
+    return {
+        "titulo": f"Variable '{simbolo}' declarada pero nunca usada",
+        "explicacion": (
+            f"Declaraste '{simbolo}' pero nunca la lees ni la modificas después. "
+            f"El compilador lo reporta como advertencia (-Wall) porque suele "
+            f"indicar un olvido o código innecesario."
+        ),
+        "causa_probable": (
+            f"Planeaste usar '{simbolo}' pero olvidaste hacerlo, la renombraste "
+            f"en algún momento y quedó la versión vieja, o era para depuración "
+            f"y ya no se necesita."
+        ),
+        "sugerencia": (
+            f"(1) Si '{simbolo}' sí se necesita, úsala en alguna instrucción. "
+            f"(2) Si ya no la necesitas, elimina su declaración en la línea "
+            f"{entry.linea}. Aunque es solo una advertencia, es buena práctica "
+            f"no dejar variables sin usar."
+        ),
+    }
+
+
+def _explain_division_by_zero(entry):
+    return {
+        "titulo": "División por cero detectada en tiempo de compilación",
+        "explicacion": (
+            f"Hay una división entre cero en la línea {entry.linea}. "
+            f"Matemáticamente no está definida, y en C produce comportamiento "
+            f"indefinido: el programa puede terminar abruptamente o dar "
+            f"resultados impredecibles."
+        ),
+        "causa_probable": (
+            f"Estás dividiendo entre la constante literal 0, o entre una "
+            f"expresión que el compilador calculó en tiempo de compilación "
+            f"y resultó ser 0."
+        ),
+        "sugerencia": (
+            f"Revisa la operación de división en la línea {entry.linea}. "
+            f"Si el divisor puede ser cero, agrega una verificación antes: "
+            f"if (divisor != 0) {{ resultado = dividendo / divisor; }}"
+        ),
+    }
+
+
 def _explain_desconocido(entry):
     mensaje = entry.mensaje_crudo or "Sin mensaje disponible."
     ubicacion = f"línea {entry.linea}" if entry.linea else "ubicación desconocida"
@@ -186,5 +231,7 @@ _HANDLERS = {
     "type_mismatch":        _explain_type_mismatch,
     "wrong_arguments":      _explain_wrong_arguments,
     "return_error":         _explain_return_error,
+    "unused_variable":      _explain_unused_variable,
+    "division_by_zero":     _explain_division_by_zero,
     "desconocido":          _explain_desconocido,
 }
