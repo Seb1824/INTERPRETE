@@ -114,6 +114,48 @@ def _explain_type_mismatch(entry):
     }
 
 
+def _explain_wrong_arguments(entry):
+    simbolo = entry.simbolo or "la función"
+    return {
+        "titulo": f"Argumentos incorrectos en la llamada a '{simbolo}'",
+        "explicacion": (
+            f"'{simbolo}' fue llamada con una cantidad o tipo de argumentos "
+            f"diferente a lo que su declaración especifica. El compilador verifica "
+            f"que las llamadas coincidan exactamente con el prototipo."
+        ),
+        "causa_probable": (
+            f"Pasaste más o menos argumentos de los que '{simbolo}' espera, "
+            f"intercambiaste el orden de los parámetros, o uno de los argumentos "
+            f"es del tipo equivocado."
+        ),
+        "sugerencia": (
+            f"Busca la declaración de '{simbolo}' y compara sus parámetros uno a uno "
+            f"con los argumentos de la línea {entry.linea}. Verifica cantidad, orden y tipo. "
+            f"Si es de biblioteca, consulta su documentación."
+        ),
+    }
+
+
+def _explain_return_error(entry):
+    simbolo = entry.simbolo or "la función"
+    return {
+        "titulo": f"Error en el valor de retorno de '{simbolo}'",
+        "explicacion": (
+            f"Hay un problema con el return en '{simbolo}': puede que esté declarada "
+            f"para retornar un tipo pero el return devuelve otro, o que falte el return."
+        ),
+        "causa_probable": (
+            f"Una función declarada como int sin return, una función void que intenta "
+            f"retornar un valor, o un return que devuelve un tipo incompatible con el declarado."
+        ),
+        "sugerencia": (
+            f"Revisa la declaración de '{simbolo}': ¿qué tipo dice que retorna? "
+            f"Verifica que todos los return dentro de la función devuelvan ese mismo tipo. "
+            f"Si no debe retornar nada, declárala como void. Revisa la línea {entry.linea}."
+        ),
+    }
+
+
 def _explain_desconocido(entry):
     mensaje = entry.mensaje_crudo or "Sin mensaje disponible."
     ubicacion = f"línea {entry.linea}" if entry.linea else "ubicación desconocida"
@@ -142,5 +184,7 @@ _HANDLERS = {
     "redeclaration":        _explain_redeclaration,
     "expected_token":       _explain_expected_token,
     "type_mismatch":        _explain_type_mismatch,
+    "wrong_arguments":      _explain_wrong_arguments,
+    "return_error":         _explain_return_error,
     "desconocido":          _explain_desconocido,
 }
