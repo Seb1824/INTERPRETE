@@ -3,8 +3,7 @@ from src.parser import DiagnosticEntry
 
 
 def explain(entry):
-    """Recibe un DiagnosticEntry y retorna dict con titulo, explicacion,
-    causa_probable y sugerencia en español."""
+    # Usamos una tabla de despacho para mapear cada tipo de error a su función explicativa.
     handler = _HANDLERS.get(entry.tipo_error, _explain_desconocido)
     return handler(entry)
 

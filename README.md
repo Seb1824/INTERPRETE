@@ -1,23 +1,34 @@
 # COMPILADOR
 
-Proyecto de compiladores orientado a construir un pipeline inicial de analisis de errores para programas en C.  
-Hasta el momento, el sistema toma un archivo `.c`, lo compila con GCC en modo de revision sintactica, captura la salida de error (`stderr`), la tokeniza y luego la transforma en diagnosticos estructurados.
+Proyecto de compiladores orientado a analizar y mejorar mensajes de error generados por GCC para programas en C.
 
-## Estado actual del proyecto
+El sistema no implementa todavia un compilador completo ni un lenguaje propio. Actualmente trabaja sobre la salida de GCC: compila un archivo `.c` en modo de revision sintactica, captura `stderr`, tokeniza los mensajes, los transforma en diagnosticos estructurados y genera explicaciones en espanol pensadas para estudiantes principiantes.
 
-El avance implementado cubre las primeras etapas del pipeline:
+## Estado Actual
 
-1. Ejecucion de GCC sobre un archivo fuente en C.
-2. Captura automatica del `stderr` generado por GCC.
-3. Analisis lexico de los mensajes de error y advertencia.
-4. Generacion de tokens con informacion relevante del diagnostico.
-5. Analisis sintactico de los tokens para formar objetos de diagnostico.
-6. Pruebas unitarias para lexer y parser.
-7. Ejemplos de entrada correctos y con errores.
+El pipeline implementado es:
 
-Actualmente el proyecto no compila un lenguaje propio completo; por ahora trabaja sobre la salida de GCC para interpretar y estructurar errores de archivos C.
+```text
+archivo .c -> GCC -> stderr -> Lexer -> Parser -> Explainer -> mensajes mejorados
+```
 
-## Estructura del proyecto
+El avance actual incluye:
+
+1. Ejecucion automatica de GCC sobre archivos C.
+2. Captura del `stderr` generado por GCC.
+3. Analisis lexico de mensajes `error`, `warning` y `note`.
+4. Clasificacion de errores frecuentes.
+5. Extraccion de simbolos relevantes.
+6. Analisis sintactico para construir `DiagnosticEntry`.
+7. Generacion de explicaciones en espanol con causa probable y sugerencia.
+8. Agrupacion de `note` de GCC como informacion secundaria del diagnostico anterior.
+9. Modo estudiante por defecto, mostrando solo mensajes mejorados.
+10. Modo `--debug`, mostrando `stderr`, tokens y diagnosticos tecnicos.
+11. Contexto de codigo fuente con linea y marcador `^`.
+12. Ejemplos separados por tipo de error.
+13. Pruebas unitarias e integracion basica del flujo.
+
+## Estructura Del Proyecto
 
 ```text
 COMPILADOR/
@@ -25,72 +36,71 @@ COMPILADOR/
 ├── README.md
 ├── examples/
 │   ├── correcto.c
-│   └── error_lexico.c
+│   ├── error_lexico.c
+│   ├── argumentos_incorrectos.c
+│   ├── division_por_cero.c
+│   ├── falta_punto_y_coma.c
+│   ├── funcion_implicita.c
+│   ├── redeclaracion.c
+│   ├── retorno_incorrecto.c
+│   ├── tipo_incompatible.c
+│   ├── variable_no_declarada.c
+│   └── variable_no_usada.c
 ├── src/
 │   ├── __init__.py
+│   ├── explainer.py
 │   ├── lexer.py
 │   ├── parser.py
 │   └── token.py
 └── test/
+    ├── conftest.py
+    ├── test_explainer.py
     ├── test_lexer.py
+    ├── test_main.py
     └── test_parser.py
 ```
 
-## Componentes implementados
+## Componentes
 
 ### `main.py`
 
-Contiene el punto de entrada del proyecto. Recibe por consola la ruta de un archivo `.c` y ejecuta el pipeline completo:
+Punto de entrada del proyecto.
+
+Ejecuta el flujo completo:
 
 ```text
-archivo .c -> GCC -> stderr -> Lexer -> tokens -> Parser -> diagnosticos
+.c -> GCC -> Lexer -> Parser -> Explainer
 ```
 
-La salida muestra:
+Por defecto muestra una salida limpia para estudiantes:
 
-- El `stderr` crudo generado por GCC.
-- La lista de tokens encontrados.
-- Los diagnosticos estructurados generados por el parser.
+- titulo del problema
+- ubicacion
+- contexto de codigo
+- explicacion
+- causa probable
+- sugerencia
+- notas de GCC asociadas, si existen
 
-### `src/token.py`
-
-Define los tipos de token usados por el lexer:
-
-- `ARCHIVO`: nombre o ruta del archivo fuente.
-- `LINEA`: linea donde GCC detecto el problema.
-- `COLUMNA`: columna del problema.
-- `SEVERIDAD`: tipo de mensaje (`error`, `warning` o `note`).
-- `MENSAJE_CRUDO`: mensaje original emitido por GCC.
-- `TIPO_ERROR`: clasificacion interna del error.
-- `SIMBOLO`: simbolo o identificador asociado al error, cuando se puede extraer.
-- `DESCONOCIDO`: linea que no coincide con los patrones esperados.
-
-Tambien define la clase `Token`, que almacena el tipo y valor de cada token.
+Tambien soporta modo debug con `--debug`.
 
 ### `src/lexer.py`
 
-Implementa el analizador lexico del proyecto.
-
-Responsabilidades principales:
-
-- Ejecutar GCC con:
+Ejecuta GCC con:
 
 ```bash
 gcc -Wall -fsyntax-only archivo.c
 ```
 
-- Capturar automaticamente el `stderr`.
-- Ignorar lineas de contexto de GCC, por ejemplo las lineas con `|`, `^` o `~`.
-- Reconocer mensajes con formato:
+Luego tokeniza la salida de GCC.
+
+Reconoce mensajes con formato:
 
 ```text
 archivo.c:linea:columna: severidad: mensaje
 ```
 
-- Generar tokens para archivo, linea, columna, severidad, mensaje, tipo de error y simbolo.
-- Clasificar errores comunes.
-
-Tipos de error reconocidos actualmente:
+Clasifica errores frecuentes:
 
 - `undeclared`
 - `expected_token`
@@ -103,17 +113,29 @@ Tipos de error reconocidos actualmente:
 - `division_by_zero`
 - `desconocido`
 
+Tambien evita usar tipos de C como simbolos. Por ejemplo, en:
+
+```text
+initialization of 'int' from 'char *'
+```
+
+no toma `int` como simbolo. Si puede leer la linea fuente, extrae la variable afectada, por ejemplo `z` en:
+
+```c
+int z = "hola";
+```
+
 ### `src/parser.py`
 
-Implementa el parser que agrupa tokens consecutivos en diagnosticos.
+Agrupa tokens consecutivos en objetos `DiagnosticEntry`.
 
-El parser espera secuencias con esta forma:
+Formato esperado:
 
 ```text
 ARCHIVO LINEA COLUMNA SEVERIDAD MENSAJE_CRUDO TIPO_ERROR [SIMBOLO]
 ```
 
-Cuando encuentra una secuencia valida, construye un `DiagnosticEntry` con:
+Cada diagnostico contiene:
 
 - `archivo`
 - `linea`
@@ -123,23 +145,38 @@ Cuando encuentra una secuencia valida, construye un `DiagnosticEntry` con:
 - `tipo_error`
 - `simbolo`
 
-Tambien ignora tokens sueltos, bloques incompletos y diagnosticos con linea o columna no numericas.
+### `src/explainer.py`
 
-## Ejemplos incluidos
+Convierte un `DiagnosticEntry` en una explicacion pedagogica en espanol.
 
-### `examples/correcto.c`
+Retorna:
 
-Archivo C valido. Sirve para comprobar que un programa sin errores no produce tokens de error.
+- `titulo`
+- `explicacion`
+- `causa_probable`
+- `sugerencia`
 
-### `examples/error_lexico.c`
+Ejemplo conceptual:
 
-Archivo C con errores intencionales. Sirve para probar la captura de errores, tokenizacion y generacion de diagnosticos.
+```text
+Variable o funcion 'y' no declarada
+Explicacion: El compilador encontro el nombre 'y' en tu codigo pero no sabe que es.
+Causa probable: Olvidaste declararla o escribiste mal su nombre.
+Sugerencia: Declara 'y' antes de usarla o revisa si falta un #include.
+```
 
-Errores incluidos:
+### `src/token.py`
 
-- Uso de variable no declarada (`y`).
-- Falta de punto y coma despues de una asignacion.
-- Asignacion incompatible de cadena a entero.
+Define los tipos de token:
+
+- `ARCHIVO`
+- `LINEA`
+- `COLUMNA`
+- `SEVERIDAD`
+- `MENSAJE_CRUDO`
+- `TIPO_ERROR`
+- `SIMBOLO`
+- `DESCONOCIDO`
 
 ## Uso
 
@@ -147,72 +184,120 @@ Requisitos:
 
 - Python 3.10 o superior.
 - GCC instalado y disponible en el `PATH`.
+- `pytest` para ejecutar pruebas.
 
-Ejecutar el pipeline sobre el ejemplo con errores:
+Modo estudiante:
 
 ```bash
 python main.py examples/error_lexico.c
 ```
 
-Ejecutar el pipeline sobre el ejemplo correcto:
+Salida esperada:
 
-```bash
-python main.py examples/correcto.c
+```text
+=== MENSAJES MEJORADOS ===
+[1] Variable o funcion 'y' no declarada
+    Ubicacion: examples\error_lexico.c:4:20
+    Codigo:
+      4 |     printf("%d\n", y);
+        |                    ^
+    Explicacion: ...
+    Causa probable: ...
+    Sugerencia: ...
 ```
 
-En Windows, si `python` no esta disponible pero existe el lanzador `py`, se puede usar:
+Modo debug:
 
 ```bash
-py main.py examples/error_lexico.c
+python main.py examples/error_lexico.c --debug
 ```
+
+El modo debug muestra:
+
+- `stderr` crudo de GCC
+- tokens generados por el lexer
+- diagnosticos del parser
+- mensajes mejorados
+
+## Ejemplos Incluidos
+
+Archivo correcto:
+
+- `examples/correcto.c`
+
+Archivo con varios errores combinados:
+
+- `examples/error_lexico.c`
+
+Archivos por tipo de error:
+
+- `examples/variable_no_declarada.c`
+- `examples/falta_punto_y_coma.c`
+- `examples/tipo_incompatible.c`
+- `examples/funcion_implicita.c`
+- `examples/argumentos_incorrectos.c`
+- `examples/variable_no_usada.c`
+- `examples/redeclaracion.c`
+- `examples/division_por_cero.c`
+- `examples/retorno_incorrecto.c`
 
 ## Pruebas
 
-El proyecto incluye pruebas para el lexer y el parser.
+Ejecutar con el entorno virtual:
 
-Para ejecutarlas:
+```bash
+.venv\Scripts\python.exe -m pytest -q
+```
+
+O con Python global si tiene `pytest` instalado:
 
 ```bash
 python -m pytest -q
 ```
 
-Pruebas del lexer:
+Cobertura actual de pruebas:
 
-- Verifica que un archivo correcto no genere errores.
-- Verifica que un archivo con errores genere tokens basicos.
-- Verifica que el `stderr` se capture automaticamente.
-- Verifica que los tokens tengan valores no vacios.
-- Verifica que una linea no parseable genere un token `DESCONOCIDO`.
+- lexer sobre archivos correctos y con errores
+- captura automatica de `stderr`
+- tokenizacion de lineas reales de GCC
+- clasificacion de errores frecuentes
+- extraccion de simbolos
+- parser sobre diagnosticos validos e invalidos
+- explainer para todos los tipos soportados
+- agrupacion de `note` como informacion secundaria
+- modo estudiante y modo debug
+- contexto de codigo fuente
+- ejemplos individuales por tipo de error
 
-Pruebas del parser:
-
-- Verifica que el parser genere diagnosticos desde los tokens del lexer.
-- Verifica diagnosticos sin simbolo.
-- Verifica que se ignoren bloques incompletos.
-- Verifica multiples diagnosticos.
-- Verifica que se ignoren tokens desconocidos entre diagnosticos.
-- Verifica que se descarten diagnosticos con linea o columna no numericas.
-
-## Verificacion realizada
-
-Desde este entorno se comprobo que GCC esta instalado:
+Ultima verificacion realizada:
 
 ```text
-gcc.exe (GCC) 13.2.0
+84 passed
 ```
 
-No se pudieron ejecutar las pruebas desde el sandbox porque no hay una instalacion de Python disponible mediante `python` ni `py`.
+## Relacion Con Los Papers Base
 
-## Pendientes y posibles mejoras
+El proyecto se alinea con la idea de mejorar mensajes de error de compilador para principiantes:
 
-- Instalar o configurar Python en el entorno para ejecutar las pruebas.
-- Agregar un archivo `requirements.txt` si se decide formalizar `pytest` como dependencia.
-- Mejorar la clasificacion de errores con mas patrones de GCC.
-- Agregar soporte para diferentes formatos de rutas y mensajes de compilador.
-- Guardar resultados en un archivo de salida, por ejemplo `resultados.txt`.
-- Agregar una etapa semantica propia si el proyecto evoluciona hacia un compilador completo.
-- Definir una gramatica formal si se implementara un lenguaje propio.
+- El paper *Compiler Error Messages Considered Unhelpful* justifica que los mensajes de compiladores suelen ser dificiles de entender, especialmente para novatos.
+- El paper *An Effective Approach to Enhancing Compiler Error Messages* muestra una estrategia similar a Decaf: tomar mensajes crudos del compilador y presentar mensajes mejorados junto con explicaciones mas utiles.
+
+Este proyecto aplica esa idea a GCC y C:
+
+```text
+mensaje crudo de GCC -> diagnostico estructurado -> explicacion pedagogica
+```
+
+## Pendientes
+
+- Agregar exportacion a `outputs/diagnosticos.txt` o `outputs/diagnosticos.json`.
+- Medir cuantos diagnosticos quedan como `desconocido`.
+- Mejorar sugerencias usando mas contexto del codigo.
+- Separar visualmente errores y advertencias.
+- Ampliar patrones para mas mensajes de GCC.
+- Evaluar el sistema con estudiantes o casos reales de laboratorio.
+- Agregar una interfaz grafica o web si el proyecto crece.
 
 ## Resumen
 
-El proyecto ya cuenta con una base funcional para analizar errores de compilacion de C usando GCC. La parte avanzada hasta ahora corresponde a la automatizacion de la captura de errores, su tokenizacion y su transformacion en diagnosticos estructurados mediante un parser simple.
+El proyecto ya cuenta con un pipeline funcional para transformar mensajes de GCC en diagnosticos estructurados y explicaciones mas comprensibles. La contribucion principal actual no es compilar un lenguaje propio, sino mejorar la retroalimentacion que recibe un estudiante cuando comete errores en programas C.
