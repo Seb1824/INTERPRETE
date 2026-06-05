@@ -70,6 +70,50 @@ def _explain_redeclaration(entry):
     }
 
 
+def _explain_expected_token(entry):
+    simbolo = entry.simbolo or "un símbolo de puntuación"
+    return {
+        "titulo": f"Se esperaba '{simbolo}' pero no se encontró",
+        "explicacion": (
+            f"El compilador llegó a la línea {entry.linea} esperando encontrar "
+            f"'{simbolo}', pero encontró otra cosa. Esto rompe la gramática de C, "
+            f"como si en una oración faltara un punto o una coma donde se requería."
+        ),
+        "causa_probable": (
+            f"Olvidar un punto y coma (;) al final de una instrucción, "
+            f"no cerrar un paréntesis o una llave, o escribir una expresión incompleta. "
+            f"A veces el error real está una línea antes de donde el compilador lo reporta."
+        ),
+        "sugerencia": (
+            f"Revisa la línea {entry.linea} y la anterior. "
+            f"¿Falta un ';'? ¿Hay paréntesis o llaves sin cerrar? "
+            f"Contar los '(' y ')' puede ayudarte a encontrar el desbalance."
+        ),
+    }
+
+
+def _explain_type_mismatch(entry):
+    simbolo = entry.simbolo or "una variable"
+    return {
+        "titulo": f"Tipos de datos incompatibles en '{simbolo}'",
+        "explicacion": (
+            f"Estás intentando mezclar o asignar valores de tipos incompatibles. "
+            f"En C cada valor tiene un tipo (int, float, char, puntero, etc.) "
+            f"y no todos pueden combinarse sin una conversión explícita."
+        ),
+        "causa_probable": (
+            f"Asignar un puntero a una variable entera, mezclar tipos en una "
+            f"operación aritmética sin cast, pasar un argumento del tipo equivocado, "
+            f"o retornar un tipo distinto al declarado en la función."
+        ),
+        "sugerencia": (
+            f"Revisa la línea {entry.linea} e identifica el tipo de cada valor. "
+            f"Si la conversión es intencional usa un cast explícito: (int) o (float). "
+            f"Si no, corrige la declaración de '{simbolo}' para que coincida."
+        ),
+    }
+
+
 def _explain_desconocido(entry):
     mensaje = entry.mensaje_crudo or "Sin mensaje disponible."
     ubicacion = f"línea {entry.linea}" if entry.linea else "ubicación desconocida"
@@ -96,5 +140,7 @@ _HANDLERS = {
     "undeclared":           _explain_undeclared,
     "implicit_declaration": _explain_implicit_declaration,
     "redeclaration":        _explain_redeclaration,
+    "expected_token":       _explain_expected_token,
+    "type_mismatch":        _explain_type_mismatch,
     "desconocido":          _explain_desconocido,
 }
