@@ -20,6 +20,30 @@ def _agrupar_diagnosticos_con_notas(diagnosticos):
     return agrupados
 
 
+def _calcular_resumen_clasificacion(diagnosticos):
+    principales = [
+        diagnostico
+        for diagnostico, _ in _agrupar_diagnosticos_con_notas(diagnosticos)
+    ]
+    total = len(principales)
+    desconocidos = [
+        diagnostico
+        for diagnostico in principales
+        if diagnostico.tipo_error == "desconocido"
+    ]
+    cantidad_desconocidos = len(desconocidos)
+    clasificados = total - cantidad_desconocidos
+    cobertura = (clasificados / total * 100) if total else 100.0
+
+    return {
+        "total": total,
+        "clasificados": clasificados,
+        "desconocidos": cantidad_desconocidos,
+        "cobertura": cobertura,
+        "diagnosticos_desconocidos": desconocidos,
+    }
+
+
 def _obtener_contexto_codigo(diagnostico):
     ruta = Path(diagnostico.archivo)
     if not ruta.exists() or diagnostico.linea <= 0:
@@ -70,10 +94,11 @@ def _imprimir_salida_debug(stderr: str, tokens, diagnosticos) -> None:
 def _imprimir_mensajes_mejorados(diagnosticos) -> None:
     print("=== MENSAJES MEJORADOS ===")
     if not diagnosticos:
-        print("(sin mensajes mejorados)")
+        print("Revision completada: no se detectaron errores ni advertencias.")
         return
 
-    for i, (d, notas) in enumerate(_agrupar_diagnosticos_con_notas(diagnosticos), start=1):
+    diagnosticos_agrupados = _agrupar_diagnosticos_con_notas(diagnosticos)
+    for i, (d, notas) in enumerate(diagnosticos_agrupados, start=1):
         mejora = explain(d)
         print(f"[{i}] {mejora['titulo']}")
         print(f"    Ubicacion: {d.archivo}:{d.linea}:{d.columna}")
@@ -88,6 +113,21 @@ def _imprimir_mensajes_mejorados(diagnosticos) -> None:
             print("    Notas de GCC:")
             for nota in notas:
                 print(f"      - {nota.mensaje_crudo}")
+
+    resumen = _calcular_resumen_clasificacion(diagnosticos)
+    print("\n=== RESUMEN DE CLASIFICACION ===")
+    print(f"Diagnosticos principales: {resumen['total']}")
+    print(f"Clasificados: {resumen['clasificados']}")
+    print(f"Desconocidos: {resumen['desconocidos']}")
+    print(f"Cobertura de clasificacion: {resumen['cobertura']:.1f}%")
+
+    if resumen["diagnosticos_desconocidos"]:
+        print("Mensajes no clasificados:")
+        for diagnostico in resumen["diagnosticos_desconocidos"]:
+            print(
+                f"  - {diagnostico.archivo}:{diagnostico.linea}:"
+                f"{diagnostico.columna}: {diagnostico.mensaje_crudo}"
+            )
 
 
 def _validar_archivo_fuente(ruta: Path) -> str | None:

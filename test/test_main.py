@@ -1,6 +1,6 @@
 from src.lexer import CompilerNotFoundError
-from src.lexer import CompilerNotFoundError
 from main import _agrupar_diagnosticos_con_notas
+from main import _calcular_resumen_clasificacion
 from main import _obtener_contexto_codigo
 from main import run_pipeline
 from src.parser import DiagnosticEntry
@@ -31,6 +31,32 @@ def test_agrupar_diagnosticos_adjunta_note_al_anterior():
     assert agrupados[1][1] == []
 
 
+def test_resumen_clasificacion_excluye_notas():
+    clasificado = make_entry("error", "error clasificado")
+    clasificado.tipo_error = "undeclared"
+    note = make_entry("note", "informacion secundaria")
+    desconocido = make_entry("warning", "mensaje sin clasificar")
+
+    resumen = _calcular_resumen_clasificacion(
+        [clasificado, note, desconocido]
+    )
+
+    assert resumen["total"] == 2
+    assert resumen["clasificados"] == 1
+    assert resumen["desconocidos"] == 1
+    assert resumen["cobertura"] == 50.0
+    assert resumen["diagnosticos_desconocidos"] == [desconocido]
+
+
+def test_resumen_sin_diagnosticos_tiene_cobertura_completa():
+    resumen = _calcular_resumen_clasificacion([])
+
+    assert resumen["total"] == 0
+    assert resumen["clasificados"] == 0
+    assert resumen["desconocidos"] == 0
+    assert resumen["cobertura"] == 100.0
+
+
 def test_run_pipeline_modo_estudiante_oculta_salida_tecnica(capsys):
     exit_code = run_pipeline("examples/error_lexico.c")
     salida = capsys.readouterr().out
@@ -41,6 +67,8 @@ def test_run_pipeline_modo_estudiante_oculta_salida_tecnica(capsys):
     assert "=== TOKENS ===" not in salida
     assert "=== DIAGNOSTICOS (PARSER) ===" not in salida
     assert "Codigo:" in salida
+    assert "=== RESUMEN DE CLASIFICACION ===" in salida
+    assert "Cobertura de clasificacion:" in salida
 
 
 def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):
@@ -52,6 +80,16 @@ def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):
     assert "=== TOKENS ===" in salida
     assert "=== DIAGNOSTICOS (PARSER) ===" in salida
     assert "=== MENSAJES MEJORADOS ===" in salida
+
+
+def test_run_pipeline_archivo_correcto_muestra_revision_exitosa(capsys):
+    exit_code = run_pipeline("examples/correcto.c")
+    salida = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Revision completada" in salida
+    assert "no se detectaron errores ni advertencias" in salida
+    assert "(sin mensajes mejorados)" not in salida
 
 
 def test_obtener_contexto_codigo_muestra_linea_y_marcador():
