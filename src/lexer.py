@@ -1,14 +1,18 @@
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from src.token import Token, TokenType
 
 TIEMPO_MAXIMO_GCC_SEGUNDOS = 10
 OPCIONES_GCC = [
+    "-O1",
     "-Wall",
     "-Wextra",
     "-Wconversion",
-    "-fsyntax-only",
+    "-Wuninitialized",
+    "-Wreturn-type",
+    "-c",
 ]
 
 
@@ -97,7 +101,8 @@ _PATRONES_TIPO = [
     (
         re.compile(
             r"expected .?[})\]].? at end of input|unmatched|unterminated|"
-            r"missing terminating|expected .?[})\]].? before",
+            r"missing terminating|expected .?[})\]].? before|"
+            r"expected declaration or statement at end of input",
             re.IGNORECASE,
         ),
         "unbalanced_delimiter",
@@ -253,13 +258,21 @@ class Lexer:
     def compilar_y_capturar(self) -> str:
         """Ejecuta GCC sobre el archivo y devuelve el stderr completo."""
         try:
-            resultado = subprocess.run(
-                ["gcc", *OPCIONES_GCC, str(self.ruta_archivo)],
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=TIEMPO_MAXIMO_GCC_SEGUNDOS,
-            )
+            with tempfile.TemporaryDirectory() as directorio_temporal:
+                objeto_temporal = Path(directorio_temporal) / "salida.o"
+                resultado = subprocess.run(
+                    [
+                        "gcc",
+                        *OPCIONES_GCC,
+                        str(self.ruta_archivo),
+                        "-o",
+                        str(objeto_temporal),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    timeout=TIEMPO_MAXIMO_GCC_SEGUNDOS,
+                )
         except FileNotFoundError as exc:
             raise CompilerNotFoundError(
                 "No se encontro GCC. Instalalo y verifica que 'gcc' este disponible en PATH."

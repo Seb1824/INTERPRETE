@@ -135,6 +135,14 @@ def test_lexer_extrae_variable_de_declaracion_en_type_mismatch():
         ("redeclaracion.c", "redeclaration"),
         ("division_por_cero.c", "division_by_zero"),
         ("retorno_incorrecto.c", "return_error"),
+        ("error_puntero.c", "pointer_error"),
+        ("formato_printf.c", "format_mismatch"),
+        ("delimitador_desbalanceado.c", "unbalanced_delimiter"),
+        ("falta_retorno.c", "missing_return"),
+        ("conversion_peligrosa.c", "dangerous_conversion"),
+        ("variable_no_inicializada.c", "uninitialized_variable"),
+        ("acceso_estructura.c", "struct_access"),
+        ("error_preprocesador.c", "preprocessor_error"),
     ],
 )
 def test_examples_generan_tipo_esperado(archivo, tipo_esperado):
