@@ -3,6 +3,29 @@ import subprocess
 from pathlib import Path
 from src.token import Token, TokenType
 
+TIEMPO_MAXIMO_GCC_SEGUNDOS = 10
+
+
+class LexerError(RuntimeError):
+    """Error controlado durante la lectura o compilacion del archivo."""
+
+
+class CompilerNotFoundError(LexerError):
+    """GCC no esta instalado o no se encuentra en PATH."""
+
+
+class CompilerTimeoutError(LexerError):
+    """GCC excedio el tiempo maximo permitido."""
+
+
+class CompilerExecutionError(LexerError):
+    """No fue posible iniciar o ejecutar GCC."""
+
+
+class SourceReadError(LexerError):
+    """No fue posible leer el archivo fuente."""
+
+
 _PATRON_GCC = re.compile(
     r'^(?P<archivo>[A-Za-z]:[/\\][^:]+\.c|[^:]+\.c):(?P<linea>\d+):(?P<columna>\d+):\s*(?P<severidad>error|warning|note):\s*(?P<mensaje>.+)$'
 )
@@ -148,15 +171,33 @@ class Lexer:
         self.ruta_archivo = Path(ruta_archivo)
         self.stderr_crudo: str = ""
         self.tokens: list[Token] = []
+        self.compilado = False
 
     def compilar_y_capturar(self) -> str:
         """Ejecuta GCC sobre el archivo y devuelve el stderr completo."""
-        resultado = subprocess.run(
-            ["gcc", "-Wall", "-fsyntax-only", str(self.ruta_archivo)],
-            capture_output=True,
-            text=True
-        )
+        try:
+            resultado = subprocess.run(
+                ["gcc", "-Wall", "-fsyntax-only", str(self.ruta_archivo)],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=TIEMPO_MAXIMO_GCC_SEGUNDOS,
+            )
+        except FileNotFoundError as exc:
+            raise CompilerNotFoundError(
+                "No se encontro GCC. Instalalo y verifica que 'gcc' este disponible en PATH."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise CompilerTimeoutError(
+                f"GCC excedio el tiempo maximo de {TIEMPO_MAXIMO_GCC_SEGUNDOS} segundos."
+            ) from exc
+        except OSError as exc:
+            raise CompilerExecutionError(
+                f"No se pudo ejecutar GCC: {exc}"
+            ) from exc
+
         self.stderr_crudo = resultado.stderr
+        self.compilado = True
         return self.stderr_crudo
 
     def tokenizar(self) -> list[Token]:
@@ -164,12 +205,17 @@ class Lexer:
         Compila el archivo, captura el stderr y retorna
         la lista de tokens extraídos de todos los mensajes de error.
         """
-        if not self.stderr_crudo:
+        if not self.compilado:
             self.compilar_y_capturar()
 
         lineas_fuente = []
         if self.ruta_archivo.exists():
-            lineas_fuente = self.ruta_archivo.read_text(encoding="utf-8").splitlines()
+            try:
+                lineas_fuente = self.ruta_archivo.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeError) as exc:
+                raise SourceReadError(
+                    f"No se pudo leer el archivo fuente '{self.ruta_archivo}': {exc}"
+                ) from exc
 
         self.tokens = []
         for linea in self.stderr_crudo.splitlines():
@@ -183,3 +229,4 @@ class Lexer:
             self.tokens.extend(_tokenizar_linea(linea, linea_fuente))
 
         return self.tokens
+
