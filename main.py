@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from src.explainer import explain
-from src.lexer import Lexer
+from src.lexer import Lexer, LexerError
 from src.parser import Parser
 
 
@@ -90,15 +90,42 @@ def _imprimir_mensajes_mejorados(diagnosticos) -> None:
                 print(f"      - {nota.mensaje_crudo}")
 
 
+def _validar_archivo_fuente(ruta: Path) -> str | None:
+    if not ruta.exists():
+        return f"No existe el archivo: {ruta}"
+
+    if not ruta.is_file():
+        return f"La ruta no corresponde a un archivo: {ruta}"
+
+    if ruta.suffix.lower() != ".c":
+        return f"El archivo debe tener extension .c: {ruta}"
+
+    try:
+        with ruta.open("r", encoding="utf-8") as archivo:
+            archivo.read(1)
+    except UnicodeError:
+        return f"El archivo no esta codificado en UTF-8: {ruta}"
+    except OSError as exc:
+        return f"No se pudo leer el archivo '{ruta}': {exc}"
+
+    return None
+
+
 def run_pipeline(ruta_archivo: str, debug: bool = False) -> int:
     ruta = Path(ruta_archivo)
-    if not ruta.exists():
-        print(f"[ERROR] No existe el archivo: {ruta}")
+    error_validacion = _validar_archivo_fuente(ruta)
+    if error_validacion:
+        print(f"[ERROR] {error_validacion}")
         return 1
 
-    lexer = Lexer(str(ruta))
-    stderr = lexer.compilar_y_capturar()
-    tokens = lexer.tokenizar()
+    try:
+        lexer = Lexer(str(ruta))
+        stderr = lexer.compilar_y_capturar()
+        tokens = lexer.tokenizar()
+    except LexerError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+
     diagnosticos = Parser(tokens).parse()
 
     if debug:
