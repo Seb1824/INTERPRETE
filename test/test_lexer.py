@@ -1,6 +1,13 @@
 import os
+import subprocess
 import pytest
-from src.lexer import Lexer
+from src.lexer import (
+    CompilerExecutionError,
+    CompilerNotFoundError,
+    CompilerTimeoutError,
+    Lexer,
+    SourceReadError,
+)
 from src.token import TokenType
 
 RUTA_CORRECTO   = os.path.join(os.path.dirname(__file__), '..', 'examples', 'correcto.c')
@@ -136,3 +143,47 @@ def test_examples_generan_tipo_esperado(archivo, tipo_esperado):
     tipos = [t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR]
 
     assert tipo_esperado in tipos
+
+
+def test_lexer_informa_si_gcc_no_esta_instalado(monkeypatch):
+    def gcc_no_encontrado(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(subprocess, "run", gcc_no_encontrado)
+
+    with pytest.raises(CompilerNotFoundError, match="No se encontro GCC"):
+        Lexer(RUTA_CORRECTO).compilar_y_capturar()
+
+
+def test_lexer_informa_timeout_de_gcc(monkeypatch):
+    def gcc_lento(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", gcc_lento)
+
+    with pytest.raises(CompilerTimeoutError, match="tiempo maximo"):
+        Lexer(RUTA_CORRECTO).compilar_y_capturar()
+
+
+def test_lexer_informa_fallo_al_ejecutar_gcc(monkeypatch):
+    def gcc_no_ejecutable(*args, **kwargs):
+        raise PermissionError("acceso denegado")
+
+    monkeypatch.setattr(subprocess, "run", gcc_no_ejecutable)
+
+    with pytest.raises(CompilerExecutionError, match="No se pudo ejecutar GCC"):
+        Lexer(RUTA_CORRECTO).compilar_y_capturar()
+
+
+def test_lexer_informa_error_de_lectura(monkeypatch):
+    lexer = Lexer(RUTA_ERROR)
+    lexer.compilado = True
+    lexer.stderr_crudo = "archivo.c:1:1: error: mensaje"
+
+    def lectura_fallida(*args, **kwargs):
+        raise PermissionError("acceso denegado")
+
+    monkeypatch.setattr(type(lexer.ruta_archivo), "read_text", lectura_fallida)
+
+    with pytest.raises(SourceReadError, match="No se pudo leer"):
+        lexer.tokenizar()

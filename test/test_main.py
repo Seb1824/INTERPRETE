@@ -1,4 +1,5 @@
 from src.lexer import CompilerNotFoundError
+from src.lexer import CompilerNotFoundError
 from main import _agrupar_diagnosticos_con_notas
 from main import _obtener_contexto_codigo
 from main import run_pipeline
