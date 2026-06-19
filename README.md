@@ -2,7 +2,7 @@
 
 Proyecto de compiladores orientado a analizar y mejorar mensajes de error generados por GCC para programas en C.
 
-El sistema no implementa todavia un compilador completo ni un lenguaje propio. Actualmente trabaja sobre la salida de GCC: compila un archivo `.c` en modo de revision sintactica, captura `stderr`, tokeniza los mensajes, los transforma en diagnosticos estructurados y genera explicaciones en espanol pensadas para estudiantes principiantes.
+El sistema no implementa todavia un compilador completo ni un lenguaje propio. Actualmente trabaja sobre la salida de GCC: analiza un archivo `.c`, captura `stderr`, tokeniza los mensajes, los transforma en diagnosticos estructurados y genera explicaciones en espanol pensadas para estudiantes principiantes.
 
 ## Estado Actual
 
@@ -27,6 +27,11 @@ El avance actual incluye:
 11. Contexto de codigo fuente con linea y marcador `^`.
 12. Ejemplos separados por tipo de error.
 13. Pruebas unitarias e integracion basica del flujo.
+14. Manejo controlado de archivos invalidos, GCC ausente, errores de lectura y timeout.
+15. Mensaje especifico cuando el codigo no contiene errores ni advertencias.
+16. Resumen con diagnosticos clasificados, desconocidos y porcentaje de cobertura.
+17. Clasificacion ampliada y comprobada con archivos C reales.
+18. Compilacion temporal sin enlace y sin dejar archivos objeto en el proyecto.
 
 ## Estructura Del Proyecto
 
@@ -37,14 +42,22 @@ COMPILADOR/
 ├── examples/
 │   ├── correcto.c
 │   ├── error_lexico.c
+│   ├── acceso_estructura.c
 │   ├── argumentos_incorrectos.c
+│   ├── conversion_peligrosa.c
+│   ├── delimitador_desbalanceado.c
 │   ├── division_por_cero.c
+│   ├── error_preprocesador.c
+│   ├── error_puntero.c
 │   ├── falta_punto_y_coma.c
+│   ├── falta_retorno.c
+│   ├── formato_printf.c
 │   ├── funcion_implicita.c
 │   ├── redeclaracion.c
 │   ├── retorno_incorrecto.c
 │   ├── tipo_incompatible.c
 │   ├── variable_no_declarada.c
+│   ├── variable_no_inicializada.c
 │   └── variable_no_usada.c
 ├── src/
 │   ├── __init__.py
@@ -81,18 +94,30 @@ Por defecto muestra una salida limpia para estudiantes:
 - causa probable
 - sugerencia
 - notas de GCC asociadas, si existen
+- resumen de cobertura de clasificacion
 
 Tambien soporta modo debug con `--debug`.
 
+Antes de ejecutar GCC valida que:
+
+- la ruta exista
+- la ruta corresponda a un archivo
+- el archivo tenga extension `.c`
+- el archivo pueda leerse como UTF-8
+
+Tambien muestra errores controlados si GCC no esta instalado, no puede ejecutarse o excede el tiempo maximo.
+
 ### `src/lexer.py`
 
-Ejecuta GCC con:
+Ejecuta GCC en modo de compilacion sin enlace con:
 
 ```bash
-gcc -Wall -fsyntax-only archivo.c
+gcc -O1 -Wall -Wextra -Wconversion -Wuninitialized -Wreturn-type -c archivo.c
 ```
 
-Luego tokeniza la salida de GCC.
+El archivo objeto se escribe dentro de un directorio temporal que se elimina automaticamente. De esta forma se activan analisis de flujo como variables no inicializadas y funciones sin retorno, sin dejar archivos `.o` en el proyecto.
+
+La ejecucion tiene un tiempo maximo de 10 segundos. Luego se tokeniza la salida de GCC.
 
 Reconoce mensajes con formato:
 
@@ -111,7 +136,17 @@ Clasifica errores frecuentes:
 - `return_error`
 - `redeclaration`
 - `division_by_zero`
+- `pointer_error`
+- `format_mismatch`
+- `unbalanced_delimiter`
+- `missing_return`
+- `dangerous_conversion`
+- `uninitialized_variable`
+- `struct_access`
+- `preprocessor_error`
 - `desconocido`
+
+La severidad `fatal error` de GCC se normaliza como `error`.
 
 Tambien evita usar tipos de C como simbolos. Por ejemplo, en:
 
@@ -219,6 +254,22 @@ El modo debug muestra:
 - diagnosticos del parser
 - mensajes mejorados
 
+Cuando no existen errores ni advertencias, el programa informa:
+
+```text
+Revision completada: no se detectaron errores ni advertencias.
+```
+
+Cuando existen diagnosticos, tambien muestra:
+
+```text
+=== RESUMEN DE CLASIFICACION ===
+Diagnosticos principales: 4
+Clasificados: 4
+Desconocidos: 0
+Cobertura de clasificacion: 100.0%
+```
+
 ## Ejemplos Incluidos
 
 Archivo correcto:
@@ -240,6 +291,16 @@ Archivos por tipo de error:
 - `examples/redeclaracion.c`
 - `examples/division_por_cero.c`
 - `examples/retorno_incorrecto.c`
+- `examples/error_puntero.c`
+- `examples/formato_printf.c`
+- `examples/delimitador_desbalanceado.c`
+- `examples/falta_retorno.c`
+- `examples/conversion_peligrosa.c`
+- `examples/variable_no_inicializada.c`
+- `examples/acceso_estructura.c`
+- `examples/error_preprocesador.c`
+
+Los ocho ultimos ejemplos fueron compilados con GCC 13.2.0 para comprobar los mensajes reales emitidos y ajustar la clasificacion.
 
 ## Pruebas
 
@@ -268,12 +329,11 @@ Cobertura actual de pruebas:
 - modo estudiante y modo debug
 - contexto de codigo fuente
 - ejemplos individuales por tipo de error
-
-Ultima verificacion realizada:
-
-```text
-84 passed
-```
+- manejo de errores externos y timeout
+- salida especifica para codigo correcto
+- resumen y cobertura de clasificacion
+- categorias ampliadas con mensajes simulados y archivos C reales
+- normalizacion de `fatal error`
 
 ## Relacion Con Los Papers Base
 
@@ -291,10 +351,11 @@ mensaje crudo de GCC -> diagnostico estructurado -> explicacion pedagogica
 ## Pendientes
 
 - Agregar exportacion a `outputs/diagnosticos.txt` o `outputs/diagnosticos.json`.
-- Medir cuantos diagnosticos quedan como `desconocido`.
 - Mejorar sugerencias usando mas contexto del codigo.
 - Separar visualmente errores y advertencias.
-- Ampliar patrones para mas mensajes de GCC.
+- Ampliar patrones a medida que aparezcan nuevos mensajes de GCC.
+- Forzar un idioma estable para la salida de GCC.
+- Mejorar la extraccion de simbolos para las categorias nuevas.
 - Evaluar el sistema con estudiantes o casos reales de laboratorio.
 - Agregar una interfaz grafica o web si el proyecto crece.
 
