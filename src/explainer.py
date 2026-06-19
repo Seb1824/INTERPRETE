@@ -200,6 +200,157 @@ def _explain_division_by_zero(entry):
     }
 
 
+def _explain_pointer_error(entry):
+    simbolo = entry.simbolo or "el puntero"
+    return {
+        "titulo": f"Uso incorrecto de puntero en '{simbolo}'",
+        "explicacion": (
+            "El compilador detectó una operación de punteros incompatible o inválida. "
+            "Un puntero debe apuntar a un tipo compatible antes de ser asignado o desreferenciado."
+        ),
+        "causa_probable": (
+            "Se intentó desreferenciar un valor que no es puntero, asignar un entero a "
+            "un puntero, o mezclar punteros de tipos incompatibles."
+        ),
+        "sugerencia": (
+            f"Revisa los tipos involucrados en la línea {entry.linea}. Comprueba el uso "
+            "de '&' y '*', y evita aplicar un cast únicamente para ocultar la advertencia."
+        ),
+    }
+
+
+def _explain_format_mismatch(entry):
+    return {
+        "titulo": "Formato y argumentos incompatibles en una función de impresión",
+        "explicacion": (
+            "El especificador de formato no coincide con el tipo o la cantidad de "
+            "argumentos enviados a printf, fprintf, sprintf u otra función similar."
+        ),
+        "causa_probable": (
+            "Se usó, por ejemplo, %d para una cadena, %s para un entero, o existe una "
+            "cantidad diferente de especificadores y argumentos."
+        ),
+        "sugerencia": (
+            f"Compara cada especificador de formato con su argumento en la línea "
+            f"{entry.linea}: %d para int, %f para double, %c para char y %s para cadenas."
+        ),
+    }
+
+
+def _explain_unbalanced_delimiter(entry):
+    simbolo = entry.simbolo or "un delimitador"
+    return {
+        "titulo": f"Delimitador '{simbolo}' faltante o desbalanceado",
+        "explicacion": (
+            "La estructura del programa contiene una llave, un paréntesis, un corchete "
+            "o una comilla que no fue cerrada correctamente."
+        ),
+        "causa_probable": (
+            "Falta un símbolo de cierre, existe uno adicional, o una cadena quedó sin "
+            "comilla final. El error real puede estar varias líneas antes."
+        ),
+        "sugerencia": (
+            f"Revisa la línea {entry.linea} y las anteriores. Empareja (), [] y {{}} "
+            "y verifica que todas las cadenas tengan comillas de apertura y cierre."
+        ),
+    }
+
+
+def _explain_missing_return(entry):
+    simbolo = entry.simbolo or "la función"
+    return {
+        "titulo": f"Falta retornar un valor en '{simbolo}'",
+        "explicacion": (
+            "Una función declarada con un tipo de retorno distinto de void puede "
+            "terminar sin ejecutar una instrucción return válida."
+        ),
+        "causa_probable": (
+            "Falta return al final de la función o alguna rama de un if, switch o bucle "
+            "permite llegar al final sin devolver un valor."
+        ),
+        "sugerencia": (
+            f"Revisa todos los caminos de ejecución de la función cerca de la línea "
+            f"{entry.linea} y asegúrate de que cada uno retorne el tipo declarado."
+        ),
+    }
+
+
+def _explain_dangerous_conversion(entry):
+    simbolo = entry.simbolo or "el valor"
+    return {
+        "titulo": f"Conversión potencialmente peligrosa en '{simbolo}'",
+        "explicacion": (
+            "La conversión puede perder precisión, cambiar el signo o producir un valor "
+            "distinto porque el tipo de destino no puede representar todos los valores."
+        ),
+        "causa_probable": (
+            "Se está convirtiendo desde un tipo de mayor tamaño o rango hacia uno menor, "
+            "por ejemplo de long a int o de un entero grande a char."
+        ),
+        "sugerencia": (
+            f"Comprueba los rangos de ambos tipos en la línea {entry.linea}. Usa un tipo "
+            "de destino más amplio y valida el valor antes de convertirlo."
+        ),
+    }
+
+
+def _explain_uninitialized_variable(entry):
+    simbolo = entry.simbolo or "la variable"
+    return {
+        "titulo": f"Variable '{simbolo}' usada sin inicializar",
+        "explicacion": (
+            "La variable puede leerse antes de recibir un valor definido. Su contenido "
+            "inicial es indeterminado y el resultado del programa no es confiable."
+        ),
+        "causa_probable": (
+            "La variable fue declarada sin valor inicial o solo se asigna en algunas "
+            "ramas del programa."
+        ),
+        "sugerencia": (
+            f"Inicializa '{simbolo}' al declararla y verifica que todos los caminos de "
+            f"ejecución le asignen un valor antes de usarla. Revisa la línea {entry.linea}."
+        ),
+    }
+
+
+def _explain_struct_access(entry):
+    simbolo = entry.simbolo or "el miembro"
+    return {
+        "titulo": f"Acceso inválido a estructura o miembro '{simbolo}'",
+        "explicacion": (
+            "El programa intenta acceder a un miembro que no existe o usa el operador "
+            "equivocado para el tipo de dato."
+        ),
+        "causa_probable": (
+            "Se usó '.' sobre un puntero, '->' sobre una estructura no puntero, el nombre "
+            "del miembro está mal escrito o la estructura aún no fue definida."
+        ),
+        "sugerencia": (
+            f"Revisa la definición de la estructura y el acceso de la línea {entry.linea}. "
+            "Usa objeto.miembro para estructuras y puntero->miembro para punteros."
+        ),
+    }
+
+
+def _explain_preprocessor_error(entry):
+    simbolo = entry.simbolo or "la directiva"
+    return {
+        "titulo": f"Error del preprocesador relacionado con '{simbolo}'",
+        "explicacion": (
+            "El problema ocurrió antes de la compilación principal, durante el manejo "
+            "de #include, macros o directivas condicionales."
+        ),
+        "causa_probable": (
+            "Puede faltar un archivo de cabecera, existir un #endif sin #if, una directiva "
+            "mal escrita o una macro invocada con argumentos incorrectos."
+        ),
+        "sugerencia": (
+            f"Revisa las directivas cercanas a la línea {entry.linea}. Confirma las rutas "
+            "de #include y que cada #if/#ifdef tenga su #endif correspondiente."
+        ),
+    }
+
+
 def _explain_desconocido(entry):
     mensaje = entry.mensaje_crudo or "Sin mensaje disponible."
     ubicacion = f"línea {entry.linea}" if entry.linea else "ubicación desconocida"
@@ -232,5 +383,13 @@ _HANDLERS = {
     "return_error":         _explain_return_error,
     "unused_variable":      _explain_unused_variable,
     "division_by_zero":     _explain_division_by_zero,
+    "pointer_error":        _explain_pointer_error,
+    "format_mismatch":      _explain_format_mismatch,
+    "unbalanced_delimiter": _explain_unbalanced_delimiter,
+    "missing_return":       _explain_missing_return,
+    "dangerous_conversion": _explain_dangerous_conversion,
+    "uninitialized_variable": _explain_uninitialized_variable,
+    "struct_access":        _explain_struct_access,
+    "preprocessor_error":   _explain_preprocessor_error,
     "desconocido":          _explain_desconocido,
 }

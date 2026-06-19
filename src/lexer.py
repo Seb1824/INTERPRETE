@@ -4,6 +4,12 @@ from pathlib import Path
 from src.token import Token, TokenType
 
 TIEMPO_MAXIMO_GCC_SEGUNDOS = 10
+OPCIONES_GCC = [
+    "-Wall",
+    "-Wextra",
+    "-Wconversion",
+    "-fsyntax-only",
+]
 
 
 class LexerError(RuntimeError):
@@ -27,7 +33,7 @@ class SourceReadError(LexerError):
 
 
 _PATRON_GCC = re.compile(
-    r'^(?P<archivo>[A-Za-z]:[/\\][^:]+\.c|[^:]+\.c):(?P<linea>\d+):(?P<columna>\d+):\s*(?P<severidad>error|warning|note):\s*(?P<mensaje>.+)$'
+    r'^(?P<archivo>[A-Za-z]:[/\\][^:]+\.c|[^:]+\.c):(?P<linea>\d+):(?P<columna>\d+):\s*(?P<severidad>fatal error|error|warning|note):\s*(?P<mensaje>.+)$'
 )
 
 # lineas de contexto que GCC imprime pero no son mensajes de error:
@@ -65,6 +71,73 @@ _TIPOS_C = {
 
 # Patrones para clasificar el tipo de error a partir del mensaje
 _PATRONES_TIPO = [
+    (
+        re.compile(
+            r"format .* expects argument|format specifies type|too many arguments for format|"
+            r"too few arguments for format|unknown conversion type character",
+            re.IGNORECASE,
+        ),
+        "format_mismatch",
+    ),
+    (
+        re.compile(
+            r"used uninitialized|may be used uninitialized|is uninitialized",
+            re.IGNORECASE,
+        ),
+        "uninitialized_variable",
+    ),
+    (
+        re.compile(
+            r"control reaches end of non-void function|no return statement in function "
+            r"returning non-void",
+            re.IGNORECASE,
+        ),
+        "missing_return",
+    ),
+    (
+        re.compile(
+            r"expected .?[})\]].? at end of input|unmatched|unterminated|"
+            r"missing terminating|expected .?[})\]].? before",
+            re.IGNORECASE,
+        ),
+        "unbalanced_delimiter",
+    ),
+    (
+        re.compile(
+            r"request for member .* in something not a structure or union|"
+            r"has no member named|invalid use of (incomplete|undefined) type",
+            re.IGNORECASE,
+        ),
+        "struct_access",
+    ),
+    (
+        re.compile(
+            r"invalid type argument of unary .?\*.?|dereferencing .* pointer|"
+            r"incompatible pointer type|"
+            r"assignment to .* pointer .* from .* without a cast",
+            re.IGNORECASE,
+        ),
+        "pointer_error",
+    ),
+    (
+        re.compile(
+            r"conversion .* may change value|overflow in conversion|"
+            r"changes value from|conversion loses integer precision",
+            re.IGNORECASE,
+        ),
+        "dangerous_conversion",
+    ),
+    (
+        re.compile(
+            r"no such file or directory|#endif without #if|#else without #if|"
+            r"#elif without #if|unterminated #if|unterminated #ifdef|"
+            r"unterminated #ifndef|macro .* requires .* arguments|"
+            r"invalid preprocessing directive|#error|"
+            r"missing binary operator before token",
+            re.IGNORECASE,
+        ),
+        "preprocessor_error",
+    ),
     (re.compile(r'undeclared|not declared|undefined', re.IGNORECASE), 'undeclared'),
     (re.compile(r"expected\s+.+\s+before", re.IGNORECASE),            'expected_token'),
     (re.compile(r'implicit declaration', re.IGNORECASE),              'implicit_declaration'),
@@ -138,11 +211,15 @@ def _tokenizar_linea(linea: str, linea_fuente: str | None = None) -> list[Token]
     if not m:
         return [Token(TokenType.DESCONOCIDO, linea)]
 
+    severidad = m.group('severidad')
+    if severidad == "fatal error":
+        severidad = "error"
+
     tokens = [
         Token(TokenType.ARCHIVO,       m.group('archivo')),
         Token(TokenType.LINEA,         m.group('linea')),
         Token(TokenType.COLUMNA,       m.group('columna')),
-        Token(TokenType.SEVERIDAD,     m.group('severidad')),
+        Token(TokenType.SEVERIDAD,     severidad),
         Token(TokenType.MENSAJE_CRUDO, m.group('mensaje')),
         Token(TokenType.TIPO_ERROR,    _clasificar_tipo(m.group('mensaje'))),
     ]
@@ -177,7 +254,7 @@ class Lexer:
         """Ejecuta GCC sobre el archivo y devuelve el stderr completo."""
         try:
             resultado = subprocess.run(
-                ["gcc", "-Wall", "-fsyntax-only", str(self.ruta_archivo)],
+                ["gcc", *OPCIONES_GCC, str(self.ruta_archivo)],
                 capture_output=True,
                 text=True,
                 errors="replace",

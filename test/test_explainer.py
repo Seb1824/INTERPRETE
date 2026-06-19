@@ -33,6 +33,14 @@ TODOS_LOS_TIPOS = [
     "return_error",
     "redeclaration",
     "division_by_zero",
+    "pointer_error",
+    "format_mismatch",
+    "unbalanced_delimiter",
+    "missing_return",
+    "dangerous_conversion",
+    "uninitialized_variable",
+    "struct_access",
+    "preprocessor_error",
     "desconocido",
 ]
 

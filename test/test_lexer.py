@@ -187,3 +187,65 @@ def test_lexer_informa_error_de_lectura(monkeypatch):
 
     with pytest.raises(SourceReadError, match="No se pudo leer"):
         lexer.tokenizar()
+
+
+@pytest.mark.parametrize(
+    ("mensaje", "tipo_esperado"),
+    [
+        (
+            "invalid type argument of unary '*' (have 'int')",
+            "pointer_error",
+        ),
+        (
+            "format '%d' expects argument of type 'int', but argument 2 has type 'char *'",
+            "format_mismatch",
+        ),
+        (
+            "expected '}' at end of input",
+            "unbalanced_delimiter",
+        ),
+        (
+            "control reaches end of non-void function [-Wreturn-type]",
+            "missing_return",
+        ),
+        (
+            "conversion from 'long int' to 'int' may change value [-Wconversion]",
+            "dangerous_conversion",
+        ),
+        (
+            "'contador' is used uninitialized [-Wuninitialized]",
+            "uninitialized_variable",
+        ),
+        (
+            "request for member 'edad' in something not a structure or union",
+            "struct_access",
+        ),
+        (
+            "fatal error: biblioteca_inexistente.h: No such file or directory",
+            "preprocessor_error",
+        ),
+    ],
+)
+def test_lexer_clasifica_nuevos_mensajes_gcc(mensaje, tipo_esperado):
+    from src.lexer import _tokenizar_linea
+
+    linea = f"ejemplo.c:10:5: error: {mensaje}"
+    tokens = _tokenizar_linea(linea)
+    tipo = next(t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR)
+
+    assert tipo == tipo_esperado
+
+
+def test_lexer_normaliza_fatal_error_de_preprocesador():
+    from src.lexer import _tokenizar_linea
+
+    linea = (
+        "ejemplo.c:1:10: fatal error: biblioteca_inexistente.h: "
+        "No such file or directory"
+    )
+    tokens = _tokenizar_linea(linea)
+    severidad = next(t.valor for t in tokens if t.tipo == TokenType.SEVERIDAD)
+    tipo = next(t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR)
+
+    assert severidad == "error"
+    assert tipo == "preprocessor_error"
