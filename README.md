@@ -1,6 +1,6 @@
-# COMPILADOR
+# Proyecto de compiladores orientado a analizar y mejorar mensajes de error generados por GCC para programas en C.
 
-Proyecto de compiladores orientado a analizar y mejorar mensajes de error generados por GCC para programas en C.
+
 
 El sistema no implementa todavia un compilador completo ni un lenguaje propio. Actualmente trabaja sobre la salida de GCC: analiza un archivo `.c`, captura `stderr`, tokeniza los mensajes, los transforma en diagnosticos estructurados y genera explicaciones en espanol pensadas para estudiantes principiantes.
 
