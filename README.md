@@ -32,6 +32,8 @@ El avance actual incluye:
 16. Resumen con diagnosticos clasificados, desconocidos y porcentaje de cobertura.
 17. Clasificacion ampliada y comprobada con archivos C reales.
 18. Compilacion temporal sin enlace y sin dejar archivos objeto en el proyecto.
+19. Diferenciacion visible entre errores y advertencias.
+20. Exportacion de resultados estructurados a JSON.
 
 ## Estructura Del Proyecto
 
@@ -88,6 +90,7 @@ Ejecuta el flujo completo:
 
 Por defecto muestra una salida limpia para estudiantes:
 
+- etiqueta `[ERROR]` o `[ADVERTENCIA]`
 - titulo del problema
 - ubicacion
 - contexto de codigo
@@ -242,7 +245,7 @@ Salida esperada:
 
 ```text
 === MENSAJES MEJORADOS ===
-[1] Variable o funcion 'y' no declarada
+[1] [ERROR] Variable o funcion 'y' no declarada
     Ubicacion: examples\error_lexico.c:4:20
     Codigo:
       4 |     printf("%d\n", y);
@@ -264,6 +267,30 @@ El modo debug muestra:
 - tokens generados por el lexer
 - diagnosticos del parser
 - mensajes mejorados
+
+Exportar resultados a JSON:
+
+```bash
+python main.py examples/error_lexico.c --json outputs/diagnosticos.json
+```
+
+La ruta padre se crea automaticamente si no existe. El JSON contiene:
+
+- archivo fuente
+- resumen de clasificacion
+- archivo, linea y columna de cada diagnostico
+- severidad y etiqueta visible
+- tipo de error y simbolo
+- mensaje original de GCC
+- titulo, explicacion, causa probable y sugerencia
+- contexto de codigo
+- notas asociadas de GCC
+
+El modo debug y la exportacion pueden combinarse:
+
+```bash
+python main.py examples/error_lexico.c --debug --json outputs/diagnosticos.json
+```
 
 Cuando no existen errores ni advertencias, el programa informa:
 
@@ -362,9 +389,7 @@ mensaje crudo de GCC -> diagnostico estructurado -> explicacion pedagogica
 
 ## Pendientes
 
-- Agregar exportacion a `outputs/diagnosticos.txt` o `outputs/diagnosticos.json`.
 - Mejorar sugerencias usando mas contexto del codigo.
-- Separar visualmente errores y advertencias.
 - Ampliar patrones a medida que aparezcan nuevos mensajes de GCC.
 - Forzar un idioma estable para la salida de GCC.
 - Mejorar la extraccion de simbolos para las categorias nuevas.

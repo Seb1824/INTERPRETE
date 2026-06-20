@@ -1,6 +1,10 @@
+import json
+
 from src.lexer import CompilerNotFoundError
 from main import _agrupar_diagnosticos_con_notas
 from main import _calcular_resumen_clasificacion
+from main import _etiqueta_severidad
+from main import _normalizar_ruta_json
 from main import _obtener_contexto_codigo
 from main import run_pipeline
 from src.parser import DiagnosticEntry
@@ -69,6 +73,8 @@ def test_run_pipeline_modo_estudiante_oculta_salida_tecnica(capsys):
     assert "Codigo:" in salida
     assert "=== RESUMEN DE CLASIFICACION ===" in salida
     assert "Cobertura de clasificacion:" in salida
+    assert "[ERROR]" in salida
+    assert "[ADVERTENCIA]" in salida
 
 
 def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):
@@ -158,4 +164,63 @@ def test_run_pipeline_informa_si_gcc_no_esta_disponible(capsys, monkeypatch):
 
     assert exit_code == 1
     assert "[ERROR] No se encontro GCC." in salida
+
+
+def test_etiquetas_de_severidad():
+    assert _etiqueta_severidad("error") == "ERROR"
+    assert _etiqueta_severidad("warning") == "ADVERTENCIA"
+    assert _etiqueta_severidad("note") == "NOTA"
+
+
+def test_normalizar_ruta_json_usa_separadores_portables():
+    assert _normalizar_ruta_json(r"examples\error_lexico.c") == (
+        "examples/error_lexico.c"
+    )
+
+
+def test_run_pipeline_exporta_json(capsys, tmp_path):
+    ruta_json = tmp_path / "reportes" / "diagnosticos.json"
+
+    exit_code = run_pipeline(
+        "examples/error_lexico.c",
+        json_output=str(ruta_json),
+    )
+    salida = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert ruta_json.exists()
+    assert "Resultado JSON guardado en:" in salida
+
+    reporte = json.loads(ruta_json.read_text(encoding="utf-8"))
+    assert reporte["archivo_fuente"] == "examples/error_lexico.c"
+    assert reporte["resumen"]["diagnosticos_principales"] >= 1
+    assert reporte["resumen"]["clasificados"] >= 1
+    assert reporte["diagnosticos"]
+
+    primer_diagnostico = reporte["diagnosticos"][0]
+    assert primer_diagnostico["severidad"] == "error"
+    assert primer_diagnostico["etiqueta_severidad"] == "ERROR"
+    assert primer_diagnostico["tipo_error"] == "undeclared"
+    assert primer_diagnostico["simbolo"] == "y"
+    assert primer_diagnostico["titulo"]
+    assert primer_diagnostico["explicacion"]
+    assert primer_diagnostico["causa_probable"]
+    assert primer_diagnostico["sugerencia"]
+    assert primer_diagnostico["contexto_codigo"]
+    assert primer_diagnostico["notas_gcc"]
+
+
+def test_run_pipeline_exporta_json_vacio_para_codigo_correcto(tmp_path):
+    ruta_json = tmp_path / "correcto.json"
+
+    exit_code = run_pipeline(
+        "examples/correcto.c",
+        json_output=str(ruta_json),
+    )
+    reporte = json.loads(ruta_json.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert reporte["resumen"]["diagnosticos_principales"] == 0
+    assert reporte["resumen"]["cobertura_clasificacion"] == 100.0
+    assert reporte["diagnosticos"] == []
 

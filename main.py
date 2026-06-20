@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 from src.explainer import explain
@@ -70,6 +71,68 @@ def _obtener_contexto_codigo(diagnostico):
     ]
 
 
+def _etiqueta_severidad(severidad: str) -> str:
+    etiquetas = {
+        "error": "ERROR",
+        "warning": "ADVERTENCIA",
+        "note": "NOTA",
+    }
+    return etiquetas.get(severidad, severidad.upper())
+
+
+def _normalizar_ruta_json(ruta: str) -> str:
+    """Usa separadores '/' para que el JSON sea portable entre sistemas."""
+    return ruta.replace("\\", "/")
+
+
+def _construir_reporte_json(ruta_fuente: str, diagnosticos) -> dict:
+    resumen = _calcular_resumen_clasificacion(diagnosticos)
+    elementos = []
+
+    for diagnostico, notas in _agrupar_diagnosticos_con_notas(diagnosticos):
+        mejora = explain(diagnostico)
+        contexto = _obtener_contexto_codigo(diagnostico)
+        elementos.append(
+            {
+                "archivo": _normalizar_ruta_json(diagnostico.archivo),
+                "linea": diagnostico.linea,
+                "columna": diagnostico.columna,
+                "severidad": diagnostico.severidad,
+                "etiqueta_severidad": _etiqueta_severidad(diagnostico.severidad),
+                "tipo_error": diagnostico.tipo_error,
+                "simbolo": diagnostico.simbolo,
+                "mensaje_crudo": diagnostico.mensaje_crudo,
+                "titulo": mejora["titulo"],
+                "explicacion": mejora["explicacion"],
+                "causa_probable": mejora["causa_probable"],
+                "sugerencia": mejora["sugerencia"],
+                "contexto_codigo": contexto[1:] if contexto else [],
+                "notas_gcc": [nota.mensaje_crudo for nota in notas],
+            }
+        )
+
+    return {
+        "archivo_fuente": _normalizar_ruta_json(ruta_fuente),
+        "resumen": {
+            "diagnosticos_principales": resumen["total"],
+            "clasificados": resumen["clasificados"],
+            "desconocidos": resumen["desconocidos"],
+            "cobertura_clasificacion": round(resumen["cobertura"], 1),
+        },
+        "diagnosticos": elementos,
+    }
+
+
+def _exportar_json(ruta_salida: str, ruta_fuente: str, diagnosticos) -> None:
+    destino = Path(ruta_salida)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    reporte = _construir_reporte_json(ruta_fuente, diagnosticos)
+    destino.write_text(
+        json.dumps(reporte, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def _imprimir_salida_debug(stderr: str, tokens, diagnosticos) -> None:
     print("=== STDERR CRUDO (GCC) ===")
     print(stderr.strip() or "(sin salida)")
@@ -100,7 +163,8 @@ def _imprimir_mensajes_mejorados(diagnosticos) -> None:
     diagnosticos_agrupados = _agrupar_diagnosticos_con_notas(diagnosticos)
     for i, (d, notas) in enumerate(diagnosticos_agrupados, start=1):
         mejora = explain(d)
-        print(f"[{i}] {mejora['titulo']}")
+        etiqueta = _etiqueta_severidad(d.severidad)
+        print(f"[{i}] [{etiqueta}] {mejora['titulo']}")
         print(f"    Ubicacion: {d.archivo}:{d.linea}:{d.columna}")
         contexto = _obtener_contexto_codigo(d)
         if contexto:
@@ -151,7 +215,11 @@ def _validar_archivo_fuente(ruta: Path) -> str | None:
     return None
 
 
-def run_pipeline(ruta_archivo: str, debug: bool = False) -> int:
+def run_pipeline(
+    ruta_archivo: str,
+    debug: bool = False,
+    json_output: str | None = None,
+) -> int:
     ruta = Path(ruta_archivo)
     error_validacion = _validar_archivo_fuente(ruta)
     if error_validacion:
@@ -168,11 +236,20 @@ def run_pipeline(ruta_archivo: str, debug: bool = False) -> int:
 
     diagnosticos = Parser(tokens).parse()
 
+    if json_output:
+        try:
+            _exportar_json(json_output, str(ruta), diagnosticos)
+        except OSError as exc:
+            print(f"[ERROR] No se pudo guardar el archivo JSON '{json_output}': {exc}")
+            return 1
+
     if debug:
         _imprimir_salida_debug(stderr, tokens, diagnosticos)
         print()
 
     _imprimir_mensajes_mejorados(diagnosticos)
+    if json_output:
+        print(f"\nResultado JSON guardado en: {json_output}")
 
     return 0
 
@@ -185,9 +262,19 @@ def main() -> int:
         action="store_true",
         help="Muestra stderr crudo, tokens y diagnosticos tecnicos ademas de los mensajes mejorados",
     )
+    parser.add_argument(
+        "--json",
+        dest="json_output",
+        metavar="RUTA",
+        help="Exporta los diagnosticos y explicaciones a un archivo JSON",
+    )
     args = parser.parse_args()
 
-    return run_pipeline(args.archivo, debug=args.debug)
+    return run_pipeline(
+        args.archivo,
+        debug=args.debug,
+        json_output=args.json_output,
+    )
 
 
 if __name__ == "__main__":
