@@ -49,6 +49,7 @@ COMPILADOR/
 │   ├── division_por_cero.c
 │   ├── error_preprocesador.c
 │   ├── error_puntero.c
+│   ├── extension_mayuscula.C
 │   ├── falta_punto_y_coma.c
 │   ├── falta_retorno.c
 │   ├── formato_printf.c
@@ -112,10 +113,10 @@ Tambien muestra errores controlados si GCC no esta instalado, no puede ejecutars
 Ejecuta GCC en modo de compilacion sin enlace con:
 
 ```bash
-gcc -O1 -Wall -Wextra -Wconversion -Wuninitialized -Wreturn-type -c archivo.c
+gcc -x c -O1 -Wall -Wextra -Wconversion -Wuninitialized -Wreturn-type -c archivo.c
 ```
 
-El archivo objeto se escribe dentro de un directorio temporal que se elimina automaticamente. De esta forma se activan analisis de flujo como variables no inicializadas y funciones sin retorno, sin dejar archivos `.o` en el proyecto.
+La opcion `-x c` fuerza el analisis como lenguaje C, incluso cuando el archivo usa la extension `.C`. El archivo objeto se escribe dentro de un directorio temporal que se elimina automaticamente. De esta forma se activan analisis de flujo como variables no inicializadas y funciones sin retorno, sin dejar archivos `.o` en el proyecto.
 
 La ejecucion tiene un tiempo maximo de 10 segundos. Luego se tokeniza la salida de GCC.
 
@@ -159,6 +160,16 @@ no toma `int` como simbolo. Si puede leer la linea fuente, extrae la variable af
 ```c
 int z = "hola";
 ```
+
+Para las categorias ampliadas realiza extraccion especifica:
+
+- variable no inicializada: `numero`
+- miembro inexistente de estructura: `altura`
+- funcion sin retorno: `calcular`
+- cabecera faltante: `biblioteca_inexistente.h`
+- especificador de formato incorrecto: `%d`
+
+El nombre de la funcion se obtiene del contexto `In function 'nombre':` que GCC imprime antes del diagnostico.
 
 ### `src/parser.py`
 
@@ -299,8 +310,9 @@ Archivos por tipo de error:
 - `examples/variable_no_inicializada.c`
 - `examples/acceso_estructura.c`
 - `examples/error_preprocesador.c`
+- `examples/extension_mayuscula.C`
 
-Los ocho ultimos ejemplos fueron compilados con GCC 13.2.0 para comprobar los mensajes reales emitidos y ajustar la clasificacion.
+Los ejemplos de categorias ampliadas fueron compilados con GCC 13.2.0 para comprobar los mensajes reales emitidos y ajustar la clasificacion. `extension_mayuscula.C` comprueba que `.C` se acepte y se fuerce como lenguaje C, no C++.
 
 ## Pruebas
 

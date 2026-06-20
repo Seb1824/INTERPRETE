@@ -8,6 +8,7 @@ from src.lexer import (
     Lexer,
     SourceReadError,
 )
+from src.parser import Parser
 from src.token import TokenType
 
 RUTA_CORRECTO   = os.path.join(os.path.dirname(__file__), '..', 'examples', 'correcto.c')
@@ -257,3 +258,107 @@ def test_lexer_normaliza_fatal_error_de_preprocesador():
 
     assert severidad == "error"
     assert tipo == "preprocessor_error"
+
+
+def test_lexer_reconoce_diagnostico_con_extension_c_mayuscula():
+    from src.lexer import _tokenizar_linea
+
+    linea = "ejemplo.C:2:12: error: 'x' undeclared"
+    tokens = _tokenizar_linea(linea)
+    archivo = next(t.valor for t in tokens if t.tipo == TokenType.ARCHIVO)
+    tipo = next(t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR)
+
+    assert archivo == "ejemplo.C"
+    assert tipo == "undeclared"
+
+
+def test_archivo_con_extension_c_mayuscula_se_clasifica():
+    ruta = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "examples",
+        "extension_mayuscula.C",
+    )
+    tokens = Lexer(ruta).tokenizar()
+    tipos = [t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR]
+
+    assert "undeclared" in tipos
+
+
+@pytest.mark.parametrize(
+    ("linea", "funcion_contexto", "tipo_esperado", "simbolo_esperado"),
+    [
+        (
+            "ejemplo.c:3:19: warning: 'numero' is used uninitialized [-Wuninitialized]",
+            None,
+            "uninitialized_variable",
+            "numero",
+        ),
+        (
+            "ejemplo.c:7:19: error: 'struct Persona' has no member named 'altura'",
+            None,
+            "struct_access",
+            "altura",
+        ),
+        (
+            "ejemplo.c:5:1: warning: control reaches end of non-void function [-Wreturn-type]",
+            "calcular",
+            "missing_return",
+            "calcular",
+        ),
+        (
+            "ejemplo.c:1:10: fatal error: biblioteca_inexistente.h: No such file or directory",
+            None,
+            "preprocessor_error",
+            "biblioteca_inexistente.h",
+        ),
+        (
+            "ejemplo.c:5:14: warning: format '%d' expects argument of type 'int', "
+            "but argument 2 has type 'char *' [-Wformat=]",
+            None,
+            "format_mismatch",
+            "%d",
+        ),
+    ],
+)
+def test_lexer_extrae_simbolos_especificos_por_categoria(
+    linea,
+    funcion_contexto,
+    tipo_esperado,
+    simbolo_esperado,
+):
+    from src.lexer import _tokenizar_linea
+
+    tokens = _tokenizar_linea(
+        linea,
+        funcion_contexto=funcion_contexto,
+    )
+    tipo = next(t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR)
+    simbolo = next(t.valor for t in tokens if t.tipo == TokenType.SIMBOLO)
+
+    assert tipo == tipo_esperado
+    assert simbolo == simbolo_esperado
+
+
+@pytest.mark.parametrize(
+    ("archivo", "tipo_esperado", "simbolo_esperado"),
+    [
+        ("variable_no_inicializada.c", "uninitialized_variable", "numero"),
+        ("acceso_estructura.c", "struct_access", "altura"),
+        ("falta_retorno.c", "missing_return", "calcular"),
+        ("error_preprocesador.c", "preprocessor_error", "biblioteca_inexistente.h"),
+        ("formato_printf.c", "format_mismatch", "%d"),
+    ],
+)
+def test_archivos_reales_extraen_simbolo_correcto(
+    archivo,
+    tipo_esperado,
+    simbolo_esperado,
+):
+    ruta = os.path.join(os.path.dirname(__file__), "..", "examples", archivo)
+    diagnosticos = Parser(Lexer(ruta).tokenizar()).parse()
+    diagnostico = next(
+        d for d in diagnosticos if d.tipo_error == tipo_esperado
+    )
+
+    assert diagnostico.simbolo == simbolo_esperado

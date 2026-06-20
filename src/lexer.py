@@ -6,6 +6,8 @@ from src.token import Token, TokenType
 
 TIEMPO_MAXIMO_GCC_SEGUNDOS = 10
 OPCIONES_GCC = [
+    "-x",
+    "c",
     "-O1",
     "-Wall",
     "-Wextra",
@@ -37,7 +39,8 @@ class SourceReadError(LexerError):
 
 
 _PATRON_GCC = re.compile(
-    r'^(?P<archivo>[A-Za-z]:[/\\][^:]+\.c|[^:]+\.c):(?P<linea>\d+):(?P<columna>\d+):\s*(?P<severidad>fatal error|error|warning|note):\s*(?P<mensaje>.+)$'
+    r'^(?P<archivo>[A-Za-z]:[/\\][^:]+\.c|[^:]+\.c):(?P<linea>\d+):(?P<columna>\d+):\s*(?P<severidad>fatal error|error|warning|note):\s*(?P<mensaje>.+)$',
+    re.IGNORECASE,
 )
 
 # lineas de contexto que GCC imprime pero no son mensajes de error:
@@ -198,7 +201,60 @@ def _extraer_variable_de_declaracion(linea_fuente: str | None) -> str | None:
     return variable
 
 
-def _tokenizar_linea(linea: str, linea_fuente: str | None = None) -> list[Token]:
+def _extraer_simbolo_especifico(
+    tipo_error: str,
+    mensaje: str,
+    linea_fuente: str | None = None,
+    funcion_contexto: str | None = None,
+) -> str | None:
+    patrones_por_tipo = {
+        "uninitialized_variable": [
+            re.compile(
+                r"'(?P<simbolo>[^']+)'\s+(?:is|may be)\s+used uninitialized",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r"'(?P<simbolo>[^']+)'\s+is uninitialized",
+                re.IGNORECASE,
+            ),
+        ],
+        "struct_access": [
+            re.compile(r"has no member named '(?P<simbolo>[^']+)'", re.IGNORECASE),
+            re.compile(r"request for member '(?P<simbolo>[^']+)'", re.IGNORECASE),
+        ],
+        "preprocessor_error": [
+            re.compile(
+                r"(?P<simbolo>[^:\s]+):\s+No such file or directory",
+                re.IGNORECASE,
+            ),
+        ],
+        "format_mismatch": [
+            re.compile(r"format '(?P<simbolo>[^']+)' expects", re.IGNORECASE),
+            re.compile(r"format specifies type '(?P<simbolo>[^']+)'", re.IGNORECASE),
+        ],
+    }
+
+    if tipo_error == "missing_return" and funcion_contexto:
+        return funcion_contexto
+
+    if tipo_error == "type_mismatch":
+        variable = _extraer_variable_de_declaracion(linea_fuente)
+        if variable:
+            return variable
+
+    for patron in patrones_por_tipo.get(tipo_error, []):
+        coincidencia = patron.search(mensaje)
+        if coincidencia:
+            return coincidencia.group("simbolo")
+
+    return None
+
+
+def _tokenizar_linea(
+    linea: str,
+    linea_fuente: str | None = None,
+    funcion_contexto: str | None = None,
+) -> list[Token]:
     """Convierte una línea del stderr de GCC en una lista de tokens."""
     linea = linea.strip()
     if not linea:
@@ -230,9 +286,12 @@ def _tokenizar_linea(linea: str, linea_fuente: str | None = None) -> list[Token]
     ]
 
     tipo_error = tokens[-1].valor
-    simbolo = None
-    if tipo_error == "type_mismatch":
-        simbolo = _extraer_variable_de_declaracion(linea_fuente)
+    simbolo = _extraer_simbolo_especifico(
+        tipo_error,
+        m.group('mensaje'),
+        linea_fuente,
+        funcion_contexto,
+    )
 
     if not simbolo:
         simbolo = _extraer_simbolo(m.group('mensaje'))
@@ -308,7 +367,16 @@ class Lexer:
                 ) from exc
 
         self.tokens = []
+        funcion_contexto = None
         for linea in self.stderr_crudo.splitlines():
+            coincidencia_funcion = re.search(
+                r"In function ['\u2018](?P<funcion>[^'\u2019]+)['\u2019]:",
+                linea,
+            )
+            if coincidencia_funcion:
+                funcion_contexto = coincidencia_funcion.group("funcion")
+                continue
+
             linea_fuente = None
             m = _PATRON_GCC.match(linea.strip())
             if m:
@@ -316,7 +384,13 @@ class Lexer:
                 if 1 <= numero_linea <= len(lineas_fuente):
                     linea_fuente = lineas_fuente[numero_linea - 1]
 
-            self.tokens.extend(_tokenizar_linea(linea, linea_fuente))
+            self.tokens.extend(
+                _tokenizar_linea(
+                    linea,
+                    linea_fuente,
+                    funcion_contexto,
+                )
+            )
 
         return self.tokens
 

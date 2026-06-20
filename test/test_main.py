@@ -139,6 +139,14 @@ def test_run_pipeline_rechaza_extension_distinta_de_c(capsys, tmp_path):
     assert "extension .c" in salida
 
 
+def test_run_pipeline_acepta_extension_c_mayuscula(capsys):
+    exit_code = run_pipeline("examples/extension_mayuscula.C")
+    salida = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "variable_no_declarada" in salida
+
+
 def test_run_pipeline_informa_si_gcc_no_esta_disponible(capsys, monkeypatch):
     def gcc_no_disponible(self):
         raise CompilerNotFoundError("No se encontro GCC.")
