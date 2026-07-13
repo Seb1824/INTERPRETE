@@ -1,5 +1,5 @@
 from src.lexer import Lexer
-from src.parser import Parser
+from src.parser import Parser, construir_arbol_diagnostico
 from src.token import Token, TokenType
 
 
@@ -101,3 +101,29 @@ def test_parser_ignora_diagnostico_si_linea_columna_no_son_numericas():
 
     diagnosticos = Parser(tokens).parse()
     assert diagnosticos == []
+
+
+def test_construir_arbol_diagnostico_genera_jerarquia():
+    diagnostico = Parser(
+        [
+            Token(TokenType.ARCHIVO, "archivo.c"),
+            Token(TokenType.LINEA, "4"),
+            Token(TokenType.COLUMNA, "9"),
+            Token(TokenType.SEVERIDAD, "error"),
+            Token(TokenType.MENSAJE_CRUDO, "'x' undeclared"),
+            Token(TokenType.TIPO_ERROR, "undeclared"),
+            Token(TokenType.SIMBOLO, "x"),
+        ]
+    ).parse()[0]
+
+    arbol = construir_arbol_diagnostico(
+        diagnostico,
+        contexto_codigo=["4 |     x = 10;", "  |     ^"],
+    )
+    datos = arbol.to_dict()
+
+    assert datos["nombre"] == "Diagnostico"
+    assert datos["hijos"][0]["nombre"] == "Ubicacion"
+    assert any(hijo["nombre"] == "TipoError" for hijo in datos["hijos"])
+    assert any(hijo["nombre"] == "Simbolo" for hijo in datos["hijos"])
+    assert "- Diagnostico" in arbol.render()[0]

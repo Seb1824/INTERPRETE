@@ -4,7 +4,7 @@ from pathlib import Path
 
 from src.explainer import explain
 from src.lexer import Lexer, LexerError
-from src.parser import Parser
+from src.parser import Parser, construir_arbol_diagnostico
 
 
 def _agrupar_diagnosticos_con_notas(diagnosticos):
@@ -92,6 +92,11 @@ def _construir_reporte_json(ruta_fuente: str, diagnosticos) -> dict:
     for diagnostico, notas in _agrupar_diagnosticos_con_notas(diagnosticos):
         mejora = explain(diagnostico)
         contexto = _obtener_contexto_codigo(diagnostico)
+        arbol = construir_arbol_diagnostico(
+            diagnostico,
+            notas=notas,
+            contexto_codigo=contexto[1:] if contexto else None,
+        )
         elementos.append(
             {
                 "archivo": _normalizar_ruta_json(diagnostico.archivo),
@@ -108,6 +113,7 @@ def _construir_reporte_json(ruta_fuente: str, diagnosticos) -> dict:
                 "sugerencia": mejora["sugerencia"],
                 "contexto_codigo": contexto[1:] if contexto else [],
                 "notas_gcc": [nota.mensaje_crudo for nota in notas],
+                "arbol_sintactico": arbol.to_dict(),
             }
         )
 
@@ -152,6 +158,22 @@ def _imprimir_salida_debug(stderr: str, tokens, diagnosticos) -> None:
             print(f"[{i}] archivo={d.archivo} linea={d.linea} columna={d.columna}")
             print(f"    severidad={d.severidad} tipo_error={d.tipo_error} simbolo={d.simbolo}")
             print(f"    mensaje={d.mensaje_crudo}")
+
+    print("\n=== ARBOL SINTACTICO DE DIAGNOSTICOS ===")
+    diagnosticos_agrupados = _agrupar_diagnosticos_con_notas(diagnosticos)
+    if not diagnosticos_agrupados:
+        print("(sin arbol)")
+    else:
+        for i, (diagnostico, notas) in enumerate(diagnosticos_agrupados, start=1):
+            contexto = _obtener_contexto_codigo(diagnostico)
+            arbol = construir_arbol_diagnostico(
+                diagnostico,
+                notas=notas,
+                contexto_codigo=contexto[1:] if contexto else None,
+            )
+            print(f"[{i}]")
+            for linea in arbol.render():
+                print(f"    {linea}")
 
 
 def _imprimir_mensajes_mejorados(diagnosticos) -> None:

@@ -1,7 +1,5 @@
 # Proyecto de compiladores orientado a analizar y mejorar mensajes de error generados por GCC para programas en C.
 
-
-
 El sistema no implementa todavia un compilador completo ni un lenguaje propio. Actualmente trabaja sobre la salida de GCC: analiza un archivo `.c`, captura `stderr`, tokeniza los mensajes, los transforma en diagnosticos estructurados y genera explicaciones en espanol pensadas para estudiantes principiantes.
 
 ## Estado Actual
@@ -9,7 +7,7 @@ El sistema no implementa todavia un compilador completo ni un lenguaje propio. A
 El pipeline implementado es:
 
 ```text
-archivo .c -> GCC -> stderr -> Lexer -> Parser -> Explainer -> mensajes mejorados
+archivo .c -> GCC -> stderr -> Lexer -> Parser -> arbol de diagnostico -> Explainer -> mensajes mejorados
 ```
 
 El avance actual incluye:
@@ -34,6 +32,7 @@ El avance actual incluye:
 18. Compilacion temporal sin enlace y sin dejar archivos objeto en el proyecto.
 19. Diferenciacion visible entre errores y advertencias.
 20. Exportacion de resultados estructurados a JSON.
+21. Arbol sintactico de diagnosticos para representar la estructura interna de cada error.
 
 ## Estructura Del Proyecto
 
@@ -176,7 +175,7 @@ El nombre de la funcion se obtiene del contexto `In function 'nombre':` que GCC 
 
 ### `src/parser.py`
 
-Agrupa tokens consecutivos en objetos `DiagnosticEntry`.
+Agrupa tokens consecutivos en objetos `DiagnosticEntry` y construye un arbol sintactico simple para cada diagnostico.
 
 Formato esperado:
 
@@ -193,6 +192,24 @@ Cada diagnostico contiene:
 - `mensaje_crudo`
 - `tipo_error`
 - `simbolo`
+
+El arbol de diagnostico no es un AST completo del lenguaje C. Es una representacion jerarquica del mensaje procesado por el sistema:
+
+```text
+Diagnostico
+  Ubicacion
+    Archivo
+    Linea
+    Columna
+  Severidad
+  TipoError
+  Simbolo
+  MensajeGCC
+  ContextoFuente
+  NotasGCC
+```
+
+Esta estructura permite mostrar que el parser no deja la salida como texto plano, sino que organiza cada diagnostico en partes reconocibles.
 
 ### `src/explainer.py`
 
@@ -266,6 +283,7 @@ El modo debug muestra:
 - `stderr` crudo de GCC
 - tokens generados por el lexer
 - diagnosticos del parser
+- arbol sintactico de diagnosticos
 - mensajes mejorados
 
 Exportar resultados a JSON:
@@ -285,6 +303,7 @@ La ruta padre se crea automaticamente si no existe. El JSON contiene:
 - titulo, explicacion, causa probable y sugerencia
 - contexto de codigo
 - notas asociadas de GCC
+- arbol sintactico del diagnostico
 
 El modo debug y la exportacion pueden combinarse:
 
@@ -363,6 +382,7 @@ Cobertura actual de pruebas:
 - clasificacion de errores frecuentes
 - extraccion de simbolos
 - parser sobre diagnosticos validos e invalidos
+- arbol sintactico de diagnosticos
 - explainer para todos los tipos soportados
 - agrupacion de `note` como informacion secundaria
 - modo estudiante y modo debug

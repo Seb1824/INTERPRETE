@@ -85,6 +85,8 @@ def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):
     assert "=== STDERR CRUDO (GCC) ===" in salida
     assert "=== TOKENS ===" in salida
     assert "=== DIAGNOSTICOS (PARSER) ===" in salida
+    assert "=== ARBOL SINTACTICO DE DIAGNOSTICOS ===" in salida
+    assert "- Diagnostico" in salida
     assert "=== MENSAJES MEJORADOS ===" in salida
 
 
@@ -208,6 +210,7 @@ def test_run_pipeline_exporta_json(capsys, tmp_path):
     assert primer_diagnostico["sugerencia"]
     assert primer_diagnostico["contexto_codigo"]
     assert primer_diagnostico["notas_gcc"]
+    assert primer_diagnostico["arbol_sintactico"]["nombre"] == "Diagnostico"
 
 
 def test_run_pipeline_exporta_json_vacio_para_codigo_correcto(tmp_path):
