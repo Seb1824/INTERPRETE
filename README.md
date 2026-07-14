@@ -7,7 +7,7 @@ El sistema no implementa todavia un compilador completo ni un lenguaje propio. A
 El pipeline implementado es:
 
 ```text
-archivo .c -> GCC -> stderr -> Lexer -> Parser -> arbol de diagnostico -> Explainer -> mensajes mejorados
+archivo .c -> GCC -> stderr -> Lexer -> Parser -> Analizador semantico -> arbol de diagnostico -> Explainer -> mensajes mejorados
 ```
 
 El avance actual incluye:
@@ -33,6 +33,7 @@ El avance actual incluye:
 19. Diferenciacion visible entre errores y advertencias.
 20. Exportacion de resultados estructurados a JSON.
 21. Arbol sintactico de diagnosticos para representar la estructura interna de cada error.
+22. Analisis semantico propio para detectar advertencias simples sin depender solo de GCC.
 
 ## Estructura Del Proyecto
 
@@ -66,6 +67,7 @@ COMPILADOR/
 │   ├── explainer.py
 │   ├── lexer.py
 │   ├── parser.py
+│   ├── semantic.py
 │   └── token.py
 └── test/
     ├── conftest.py
@@ -211,6 +213,26 @@ Diagnostico
 
 Esta estructura permite mostrar que el parser no deja la salida como texto plano, sino que organiza cada diagnostico en partes reconocibles.
 
+### `src/semantic.py`
+
+Realiza un analisis semantico basico directamente sobre el codigo fuente. No reemplaza a GCC, sino que complementa sus diagnosticos con reglas propias del proyecto.
+
+Actualmente detecta:
+
+- variables locales declaradas pero no utilizadas
+- funciones no `void` que pueden terminar sin retornar un valor
+
+Los diagnosticos generados por este modulo usan `origen="semantico"`. Antes de mostrarlos, `main.py` los combina con los diagnosticos de GCC y evita duplicados claros por tipo de error, simbolo y ubicacion.
+
+Esto permite separar mejor las etapas del proyecto:
+
+```text
+Lexer: extrae tokens desde stderr de GCC
+Parser: agrupa tokens en DiagnosticEntry
+Semantico: analiza reglas simples del codigo fuente
+Explainer: transforma diagnosticos en explicaciones pedagogicas
+```
+
 ### `src/explainer.py`
 
 Convierte un `DiagnosticEntry` en una explicacion pedagogica en espanol.
@@ -283,6 +305,7 @@ El modo debug muestra:
 - `stderr` crudo de GCC
 - tokens generados por el lexer
 - diagnosticos del parser
+- diagnosticos generados por el analizador semantico propio
 - arbol sintactico de diagnosticos
 - mensajes mejorados
 
@@ -298,6 +321,7 @@ La ruta padre se crea automaticamente si no existe. El JSON contiene:
 - resumen de clasificacion
 - archivo, linea y columna de cada diagnostico
 - severidad y etiqueta visible
+- origen del diagnostico: `gcc` o `semantico`
 - tipo de error y simbolo
 - mensaje original de GCC
 - titulo, explicacion, causa probable y sugerencia
@@ -358,6 +382,12 @@ Archivos por tipo de error:
 - `examples/error_preprocesador.c`
 - `examples/extension_mayuscula.C`
 
+Archivos especificos para demostrar el analisis semantico propio:
+
+- `examples/semantico_variable_no_usada.c`
+- `examples/semantico_falta_retorno.c`
+- `examples/semantico_correcto.c`
+
 Los ejemplos de categorias ampliadas fueron compilados con GCC 13.2.0 para comprobar los mensajes reales emitidos y ajustar la clasificacion. `extension_mayuscula.C` comprueba que `.C` se acepte y se fuerce como lenguaje C, no C++.
 
 ## Pruebas
@@ -383,6 +413,7 @@ Cobertura actual de pruebas:
 - extraccion de simbolos
 - parser sobre diagnosticos validos e invalidos
 - arbol sintactico de diagnosticos
+- analizador semantico propio
 - explainer para todos los tipos soportados
 - agrupacion de `note` como informacion secundaria
 - modo estudiante y modo debug
@@ -410,6 +441,7 @@ mensaje crudo de GCC -> diagnostico estructurado -> explicacion pedagogica
 ## Pendientes
 
 - Mejorar sugerencias usando mas contexto del codigo.
+- Ampliar el analizador semantico con mas reglas propias.
 - Ampliar patrones a medida que aparezcan nuevos mensajes de GCC.
 - Forzar un idioma estable para la salida de GCC.
 - Mejorar la extraccion de simbolos para las categorias nuevas.

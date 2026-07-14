@@ -15,6 +15,7 @@ class DiagnosticEntry:
     mensaje_crudo: str
     tipo_error: str
     simbolo: Optional[str] = None
+    origen: str = "gcc"
 
 
 @dataclass
@@ -61,6 +62,7 @@ def construir_arbol_diagnostico(
 
     raiz.agregar("Severidad", diagnostico.severidad)
     raiz.agregar("TipoError", diagnostico.tipo_error)
+    raiz.agregar("Origen", diagnostico.origen)
 
     if diagnostico.simbolo:
         raiz.agregar("Simbolo", diagnostico.simbolo)

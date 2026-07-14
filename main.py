@@ -5,6 +5,7 @@ from pathlib import Path
 from src.explainer import explain
 from src.lexer import Lexer, LexerError
 from src.parser import Parser, construir_arbol_diagnostico
+from src.semantic import SemanticAnalyzer
 
 
 def _agrupar_diagnosticos_con_notas(diagnosticos):
@@ -43,6 +44,32 @@ def _calcular_resumen_clasificacion(diagnosticos):
         "cobertura": cobertura,
         "diagnosticos_desconocidos": desconocidos,
     }
+
+
+def _combinar_diagnosticos(diagnosticos_gcc, diagnosticos_semanticos):
+    """Agrega diagnosticos semanticos evitando duplicados claros con GCC."""
+    combinados = list(diagnosticos_gcc)
+
+    for semantico in diagnosticos_semanticos:
+        duplicado = any(
+            existente.tipo_error == semantico.tipo_error
+            and (
+                (
+                    semantico.simbolo
+                    and existente.simbolo
+                    and existente.simbolo == semantico.simbolo
+                )
+                or (
+                    existente.archivo == semantico.archivo
+                    and existente.linea == semantico.linea
+                )
+            )
+            for existente in combinados
+        )
+        if not duplicado:
+            combinados.append(semantico)
+
+    return combinados
 
 
 def _obtener_contexto_codigo(diagnostico):
@@ -105,6 +132,7 @@ def _construir_reporte_json(ruta_fuente: str, diagnosticos) -> dict:
                 "severidad": diagnostico.severidad,
                 "etiqueta_severidad": _etiqueta_severidad(diagnostico.severidad),
                 "tipo_error": diagnostico.tipo_error,
+                "origen": diagnostico.origen,
                 "simbolo": diagnostico.simbolo,
                 "mensaje_crudo": diagnostico.mensaje_crudo,
                 "titulo": mejora["titulo"],
@@ -139,7 +167,12 @@ def _exportar_json(ruta_salida: str, ruta_fuente: str, diagnosticos) -> None:
     )
 
 
-def _imprimir_salida_debug(stderr: str, tokens, diagnosticos) -> None:
+def _imprimir_salida_debug(
+    stderr: str,
+    tokens,
+    diagnosticos,
+    diagnosticos_semanticos=None,
+) -> None:
     print("=== STDERR CRUDO (GCC) ===")
     print(stderr.strip() or "(sin salida)")
 
@@ -155,6 +188,19 @@ def _imprimir_salida_debug(stderr: str, tokens, diagnosticos) -> None:
         print("(sin diagnosticos)")
     else:
         for i, d in enumerate(diagnosticos, start=1):
+            print(f"[{i}] archivo={d.archivo} linea={d.linea} columna={d.columna}")
+            print(
+                f"    severidad={d.severidad} tipo_error={d.tipo_error} "
+                f"origen={d.origen} simbolo={d.simbolo}"
+            )
+            print(f"    mensaje={d.mensaje_crudo}")
+
+    print("\n=== ANALISIS SEMANTICO PROPIO ===")
+    diagnosticos_semanticos = diagnosticos_semanticos or []
+    if not diagnosticos_semanticos:
+        print("(sin diagnosticos semanticos)")
+    else:
+        for i, d in enumerate(diagnosticos_semanticos, start=1):
             print(f"[{i}] archivo={d.archivo} linea={d.linea} columna={d.columna}")
             print(f"    severidad={d.severidad} tipo_error={d.tipo_error} simbolo={d.simbolo}")
             print(f"    mensaje={d.mensaje_crudo}")
@@ -188,6 +234,8 @@ def _imprimir_mensajes_mejorados(diagnosticos) -> None:
         etiqueta = _etiqueta_severidad(d.severidad)
         print(f"[{i}] [{etiqueta}] {mejora['titulo']}")
         print(f"    Ubicacion: {d.archivo}:{d.linea}:{d.columna}")
+        if d.origen != "gcc":
+            print(f"    Origen: analizador semantico del proyecto")
         contexto = _obtener_contexto_codigo(d)
         if contexto:
             for linea_contexto in contexto:
@@ -256,7 +304,12 @@ def run_pipeline(
         print(f"[ERROR] {exc}")
         return 1
 
-    diagnosticos = Parser(tokens).parse()
+    diagnosticos_gcc = Parser(tokens).parse()
+    diagnosticos_semanticos = SemanticAnalyzer(str(ruta)).analizar()
+    diagnosticos = _combinar_diagnosticos(
+        diagnosticos_gcc,
+        diagnosticos_semanticos,
+    )
 
     if json_output:
         try:
@@ -266,7 +319,12 @@ def run_pipeline(
             return 1
 
     if debug:
-        _imprimir_salida_debug(stderr, tokens, diagnosticos)
+        _imprimir_salida_debug(
+            stderr,
+            tokens,
+            diagnosticos,
+            diagnosticos_semanticos=diagnosticos_semanticos,
+        )
         print()
 
     _imprimir_mensajes_mejorados(diagnosticos)
