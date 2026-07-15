@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 import tempfile
@@ -331,6 +332,7 @@ class Lexer:
                     text=True,
                     errors="replace",
                     timeout=TIEMPO_MAXIMO_GCC_SEGUNDOS,
+                    env={**os.environ, "LC_ALL": "C", "LANG": "C"},  
                 )
         except FileNotFoundError as exc:
             raise CompilerNotFoundError(
