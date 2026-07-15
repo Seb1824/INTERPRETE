@@ -31,6 +31,24 @@ def _explain_undeclared(entry):
 
 def _explain_implicit_declaration(entry):
     simbolo = entry.simbolo or "la función"
+    
+    if simbolo in ["printf", "scanf", "puts", "getchar"]:
+        return {
+            "titulo": f"Falta incluir <stdio.h> para usar '{simbolo}'",
+            "explicacion": (
+                f"Estás intentando usar '{simbolo}', que es una función de la biblioteca "
+                f"estándar de C, pero el compilador no sabe cómo usarla."
+            ),
+            "causa_probable": (
+                f"Olvidaste incluir la biblioteca de entrada/salida estándar <stdio.h> "
+                f"al principio de tu código."
+            ),
+            "sugerencia": (
+                f"Agrega la línea '#include <stdio.h>' en la parte superior de tu archivo, "
+                f"justo en la línea 1, antes de declarar cualquier función."
+            ),
+        }
+
     return {
         "titulo": f"Declaración implícita de la función '{simbolo}'",
         "explicacion": (
@@ -47,7 +65,6 @@ def _explain_implicit_declaration(entry):
             f"agrega su prototipo antes de main(): por ejemplo, int {simbolo}(int x);"
         ),
     }
-
 
 def _explain_redeclaration(entry):
     simbolo = entry.simbolo or "el identificador"

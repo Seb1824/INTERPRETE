@@ -14,9 +14,10 @@ def _agrupar_diagnosticos_con_notas(diagnosticos):
 
     for diagnostico in diagnosticos:
         if diagnostico.severidad == "note" and agrupados:
-            agrupados[-1][1].append(diagnostico)
+            notas_actuales = agrupados[-1][1]
+            if not any(n.mensaje_crudo == diagnostico.mensaje_crudo for n in notas_actuales):
+                notas_actuales.append(diagnostico)
             continue
-
         agrupados.append((diagnostico, []))
 
     return agrupados
@@ -47,8 +48,22 @@ def _calcular_resumen_clasificacion(diagnosticos):
 
 
 def _combinar_diagnosticos(diagnosticos_gcc, diagnosticos_semanticos):
-    """Agrega diagnosticos semanticos evitando duplicados claros con GCC."""
-    combinados = list(diagnosticos_gcc)
+    """Filtra redundancias internas de GCC y agrega diagnosticos semanticos."""
+    
+    gcc_dict = {}
+    for diag in diagnosticos_gcc:
+        clave = (diag.linea, diag.columna, diag.simbolo, diag.tipo_error)
+        
+        if clave not in gcc_dict:
+            gcc_dict[clave] = diag
+        else:
+            existente = gcc_dict[clave]
+            if diag.severidad == "error" and existente.severidad == "warning":
+                gcc_dict[clave] = diag
+                
+    gcc_limpios = list(gcc_dict.values())
+
+    combinados = list(gcc_limpios)
 
     for semantico in diagnosticos_semanticos:
         duplicado = any(
