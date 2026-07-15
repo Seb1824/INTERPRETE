@@ -59,6 +59,9 @@ class SemanticAnalyzer:
         funciones = _extraer_funciones(lineas_limpias)
 
         diagnosticos: list[DiagnosticEntry] = []
+
+        diagnosticos.extend(self._analizar_cabeceras(lineas, lineas_limpias))
+
         for funcion in funciones:
             diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
@@ -145,6 +148,34 @@ class SemanticAnalyzer:
                     origen="semantico",
                 )
             ]
+        return []
+    
+    def _analizar_cabeceras(self, lineas: list[str], lineas_limpias: list[str]) -> list[DiagnosticEntry]:
+        tiene_stdio = any(re.search(r'#include\s*[<"]stdio\.h[>"]', linea) for linea in lineas)
+        
+        if tiene_stdio:
+            return []
+
+        patron_io = re.compile(r'\b(printf|scanf)\b')
+        for i, linea in enumerate(lineas_limpias):
+            match = patron_io.search(linea)
+            if match:
+                simbolo_usado = match.group(1)
+                return [
+                    DiagnosticEntry(
+                        archivo=self.ruta_fuente,
+                        linea=i + 1,
+                        columna=match.start(1) + 1,
+                        severidad="error",
+                        mensaje_crudo=(
+                            f"analizador semantico: se uso '{simbolo_usado}' "
+                            "sin incluir la biblioteca <stdio.h>"
+                        ),
+                        tipo_error="implicit_declaration", 
+                        simbolo=simbolo_usado,
+                        origen="semantico",
+                    )
+                ]
         return []
 
 def _limpiar_comentarios_y_cadenas(lineas: list[str]) -> list[str]:
