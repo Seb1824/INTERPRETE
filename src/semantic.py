@@ -62,6 +62,7 @@ class SemanticAnalyzer:
         for funcion in funciones:
             diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
+            diagnosticos.extend(self._analizar_tipo_main(funcion)) 
 
         return diagnosticos
 
@@ -127,7 +128,24 @@ class SemanticAnalyzer:
                 origen="semantico",
             )
         ]
-
+    def _analizar_tipo_main(self, funcion: _Funcion) -> list[DiagnosticEntry]:
+        if funcion.nombre == "main" and funcion.tipo_retorno.strip() == "void":
+            return [
+                DiagnosticEntry(
+                    archivo=self.ruta_fuente,
+                    linea=funcion.linea_inicio,
+                    columna=funcion.columna_inicio,
+                    severidad="warning",
+                    mensaje_crudo=(
+                        "analizador semantico: la funcion principal 'main' "
+                        "deberia retornar 'int' en lugar de 'void'"
+                    ),
+                    tipo_error="return_error",
+                    simbolo="main",
+                    origen="semantico",
+                )
+            ]
+        return []
 
 def _limpiar_comentarios_y_cadenas(lineas: list[str]) -> list[str]:
     limpias: list[str] = []

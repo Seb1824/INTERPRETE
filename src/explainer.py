@@ -134,9 +134,27 @@ def _explain_wrong_arguments(entry):
         ),
     }
 
-
 def _explain_return_error(entry):
     simbolo = entry.simbolo or "la función"
+    
+    if simbolo == "main":
+        return {
+            "titulo": "Uso de 'void main' en lugar de 'int main'",
+            "explicacion": (
+                "La función principal de un programa en C siempre debe devolver un "
+                "número entero al sistema operativo para indicar si terminó correctamente."
+            ),
+            "causa_probable": (
+                "Declaraste la función como 'void main()'. Aunque en algunos compiladores "
+                "antiguos esto funcionaba, el estándar estricto de C exige que sea 'int'."
+            ),
+            "sugerencia": (
+                "Cambia 'void main()' por 'int main()'. Además, asegúrate de agregar "
+                "'return 0;' justo antes de cerrar la llave final de main() para indicar "
+                "que el programa terminó con éxito."
+            ),
+        }
+
     return {
         "titulo": f"Error en el valor de retorno de '{simbolo}'",
         "explicacion": (
@@ -153,7 +171,6 @@ def _explain_return_error(entry):
             f"Si no debe retornar nada, declárala como void. Revisa la línea {entry.linea}."
         ),
     }
-
 
 def _explain_unused_variable(entry):
     simbolo = entry.simbolo or "una variable"
