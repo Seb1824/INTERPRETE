@@ -61,6 +61,7 @@ class SemanticAnalyzer:
         diagnosticos: list[DiagnosticEntry] = []
 
         diagnosticos.extend(self._analizar_cabeceras(lineas, lineas_limpias))
+        diagnosticos.extend(self._analizar_division_cero(lineas_limpias))
 
         for funcion in funciones:
             diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
@@ -177,6 +178,29 @@ class SemanticAnalyzer:
                     )
                 ]
         return []
+    
+    def _analizar_division_cero(self, lineas_limpias: list[str]) -> list[DiagnosticEntry]:
+        diagnosticos: list[DiagnosticEntry] = []
+        patron_div_cero = re.compile(r'/\s*0(?:\.0+)?\b')
+
+        for i, linea in enumerate(lineas_limpias):
+            match = patron_div_cero.search(linea)
+            if match:
+                diagnosticos.append(
+                    DiagnosticEntry(
+                        archivo=self.ruta_fuente,
+                        linea=i + 1,
+                        columna=match.start() + 1,
+                        severidad="warning",
+                        mensaje_crudo=(
+                            "analizador semantico: division directa por cero literal detectada"
+                        ),
+                        tipo_error="division_by_zero", 
+                        simbolo="/",
+                        origen="semantico",
+                    )
+                )
+        return diagnosticos
 
 def _limpiar_comentarios_y_cadenas(lineas: list[str]) -> list[str]:
     limpias: list[str] = []
