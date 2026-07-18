@@ -1,12 +1,33 @@
 from __future__ import annotations
 from src.parser import DiagnosticEntry
+import inspect
+from pathlib import Path
 
+def _extraer_linea_cruda(archivo: str, numero_linea: int) -> str:
+    """Lee el archivo y extrae la línea exacta de código limpiando espacios."""
+    try:
+        ruta = Path(archivo)
+        if ruta.exists():
+            lineas = ruta.read_text(encoding="utf-8").splitlines()
+            if 0 < numero_linea <= len(lineas):
+                return lineas[numero_linea - 1].strip()
+    except Exception:
+        pass
+    return ""
 
 def explain(entry):
-    # Usamos una tabla de despacho para mapear cada tipo de error a su función explicativa.
+    # 1. Extraemos la línea de código problemática
+    linea_codigo = _extraer_linea_cruda(entry.archivo, entry.linea)
+    
+    # 2. Obtenemos la función correspondiente al error
     handler = _HANDLERS.get(entry.tipo_error, _explain_desconocido)
+    
+    # 3. Solo le pasamos 'linea_codigo' si la función lo tiene en sus parámetros
+    if "linea_codigo" in inspect.signature(handler).parameters:
+        return handler(entry, linea_codigo)
+        
+    # Si la función aún no ha sido actualizada, la llamamos normal
     return handler(entry)
-
 
 def _explain_undeclared(entry):
     simbolo = entry.simbolo or "desconocido"
@@ -86,8 +107,27 @@ def _explain_redeclaration(entry):
     }
 
 
-def _explain_expected_token(entry):
+def _explain_expected_token(entry, linea_codigo=""):
     simbolo = entry.simbolo or "un símbolo de puntuación"
+    
+    if simbolo in [";", ",", "';'", "','"]:
+        linea_anterior = _extraer_linea_cruda(entry.archivo, entry.linea - 1)
+        
+        if linea_anterior:
+            sugerencia_dinamica = (
+                f"Agrega el punto y coma faltante. La línea anterior debería quedar así:\n"
+                f"    {linea_anterior};"
+            )
+        else:
+            sugerencia_dinamica = "Asegúrate de colocar un ';' al final de la instrucción anterior."
+            
+        return {
+            "titulo": "Falta punto y coma ';'",
+            "explicacion": f"El compilador se detuvo en la línea {entry.linea} porque la instrucción anterior no fue terminada correctamente.",
+            "causa_probable": f"Olvidaste poner un punto y coma (;) al final de la línea {entry.linea - 1}.",
+            "sugerencia": sugerencia_dinamica,
+        }
+
     return {
         "titulo": f"Se esperaba '{simbolo}' pero no se encontró",
         "explicacion": (
