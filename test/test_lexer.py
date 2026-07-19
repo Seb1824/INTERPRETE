@@ -352,6 +352,75 @@ def test_lexer_extrae_simbolos_especificos_por_categoria(
 
 
 @pytest.mark.parametrize(
+    (
+        "linea",
+        "linea_fuente",
+        "funcion_contexto",
+        "tipo_esperado",
+        "simbolo_esperado",
+    ),
+    [
+        (
+            "ejemplo.c:3:17: error: invalid type argument of unary '*' (have 'int')",
+            "    int valor = *numero;",
+            "main",
+            "pointer_error",
+            "numero",
+        ),
+        (
+            "ejemplo.c:4:18: warning: assignment to 'int *' from incompatible "
+            "pointer type 'char *' [-Wincompatible-pointer-types]",
+            "    int *destino = origen;",
+            "main",
+            "pointer_error",
+            "destino",
+        ),
+        (
+            "ejemplo.c:2:26: warning: overflow in conversion from 'long long int' "
+            "to 'long int' changes value from '5000000000' to '705032704'",
+            "    long numero_grande = 5000000000L;",
+            "main",
+            "dangerous_conversion",
+            "numero_grande",
+        ),
+        (
+            "ejemplo.c:6:21: error: too few arguments to function 'suma'",
+            "    int resultado = suma(5);",
+            "main",
+            "wrong_arguments",
+            "suma",
+        ),
+        (
+            "ejemplo.c:2:12: warning: 'return' with a value, in function returning void",
+            "    return 1;",
+            "imprimir",
+            "return_error",
+            "imprimir",
+        ),
+    ],
+)
+def test_lexer_extrae_simbolos_de_punteros_conversiones_argumentos_y_retornos(
+    linea,
+    linea_fuente,
+    funcion_contexto,
+    tipo_esperado,
+    simbolo_esperado,
+):
+    from src.lexer import _tokenizar_linea
+
+    tokens = _tokenizar_linea(
+        linea,
+        linea_fuente=linea_fuente,
+        funcion_contexto=funcion_contexto,
+    )
+    tipo = next(t.valor for t in tokens if t.tipo == TokenType.TIPO_ERROR)
+    simbolo = next(t.valor for t in tokens if t.tipo == TokenType.SIMBOLO)
+
+    assert tipo == tipo_esperado
+    assert simbolo == simbolo_esperado
+
+
+@pytest.mark.parametrize(
     ("archivo", "tipo_esperado", "simbolo_esperado"),
     [
         ("variable_no_inicializada.c", "uninitialized_variable", "numero"),
@@ -359,6 +428,10 @@ def test_lexer_extrae_simbolos_especificos_por_categoria(
         ("falta_retorno.c", "missing_return", "calcular"),
         ("error_preprocesador.c", "preprocessor_error", "biblioteca_inexistente.h"),
         ("formato_printf.c", "format_mismatch", "%d"),
+        ("error_puntero.c", "pointer_error", "numero"),
+        ("conversion_peligrosa.c", "dangerous_conversion", "numero_grande"),
+        ("argumentos_incorrectos.c", "wrong_arguments", "suma"),
+        ("retorno_incorrecto.c", "return_error", "imprimir"),
     ],
 )
 def test_archivos_reales_extraen_simbolo_correcto(

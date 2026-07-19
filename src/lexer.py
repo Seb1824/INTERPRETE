@@ -180,10 +180,23 @@ _PATRONES_TIPO = [
 
 def _extraer_simbolo(mensaje: str) -> str | None:
     for patron in _PATRONES_SIMBOLO:
-        m = patron.search(mensaje)
-        if m and m.group('simbolo') not in _TIPOS_C:
-            return m.group('simbolo')
+        for coincidencia in patron.finditer(mensaje):
+            simbolo = coincidencia.group('simbolo')
+            if not _es_tipo_c(simbolo):
+                return simbolo
     return None
+
+
+def _es_tipo_c(valor: str) -> bool:
+    normalizado = valor.replace("*", " ").strip()
+    palabras = normalizado.split()
+    if not palabras:
+        return False
+
+    if palabras[0] in {"struct", "union", "enum"}:
+        return True
+
+    return all(palabra in _TIPOS_C for palabra in palabras)
 
 
 def _clasificar_tipo(mensaje: str) -> str:
@@ -207,6 +220,19 @@ def _extraer_variable_de_declaracion(linea_fuente: str | None) -> str | None:
         return None
 
     return variable
+
+
+def _extraer_operando_dereferencia(linea_fuente: str | None) -> str | None:
+    if not linea_fuente:
+        return None
+
+    coincidencia = re.search(
+        r"\*\s*(?P<simbolo>[A-Za-z_][A-Za-z0-9_]*)\b",
+        linea_fuente,
+    )
+    if coincidencia:
+        return coincidencia.group("simbolo")
+    return None
 
 
 def _extraer_simbolo_especifico(
@@ -240,15 +266,42 @@ def _extraer_simbolo_especifico(
             re.compile(r"format '(?P<simbolo>[^']+)' expects", re.IGNORECASE),
             re.compile(r"format specifies type '(?P<simbolo>[^']+)'", re.IGNORECASE),
         ],
+        "wrong_arguments": [
+            re.compile(
+                r"too (?:few|many) arguments? (?:to|for) (?:function )?"
+                r"'(?P<simbolo>[^']+)'",
+                re.IGNORECASE,
+            ),
+        ],
+        "pointer_error": [
+            re.compile(
+                r"passing argument \d+ of '(?P<simbolo>[^']+)'",
+                re.IGNORECASE,
+            ),
+        ],
     }
 
-    if tipo_error == "missing_return" and funcion_contexto:
+    if tipo_error in {"missing_return", "return_error"} and funcion_contexto:
         return funcion_contexto
 
     if tipo_error == "assignment_in_condition":
         return "="
 
-    if tipo_error == "type_mismatch":
+    if tipo_error in {"type_mismatch", "dangerous_conversion"}:
+        variable = _extraer_variable_de_declaracion(linea_fuente)
+        if variable:
+            return variable
+
+    if tipo_error == "pointer_error":
+        if re.search(
+            r"invalid type argument of unary|dereferencing",
+            mensaje,
+            re.IGNORECASE,
+        ):
+            operando = _extraer_operando_dereferencia(linea_fuente)
+            if operando:
+                return operando
+
         variable = _extraer_variable_de_declaracion(linea_fuente)
         if variable:
             return variable
