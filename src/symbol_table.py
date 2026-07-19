@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-
 from src.ast_builder import SourceASTNode
 
 
@@ -91,6 +89,26 @@ class UnresolvedSymbolUse:
         }
 
 
+@dataclass
+class SymbolRedeclaration:
+    nombre: str
+    ambito_id: str
+    linea_original: int
+    columna_original: int
+    linea_redeclaracion: int
+    columna_redeclaracion: int
+
+    def to_dict(self) -> dict:
+        return {
+            "nombre": self.nombre,
+            "ambito_id": self.ambito_id,
+            "linea_original": self.linea_original,
+            "columna_original": self.columna_original,
+            "linea_redeclaracion": self.linea_redeclaracion,
+            "columna_redeclaracion": self.columna_redeclaracion,
+        }
+
+
 class SymbolTable:
     def __init__(self):
         self.ambito_global = Scope(
@@ -100,6 +118,7 @@ class SymbolTable:
             linea_inicio=1,
         )
         self.usos_no_resueltos: list[UnresolvedSymbolUse] = []
+        self.redeclaraciones: list[SymbolRedeclaration] = []
         self._contador_ambitos = 1
 
     def crear_ambito(
@@ -129,6 +148,20 @@ class SymbolTable:
         linea: int,
         columna: int,
     ) -> Symbol:
+        existente = ambito.buscar_local(nombre)
+        if existente is not None:
+            self.redeclaraciones.append(
+                SymbolRedeclaration(
+                    nombre=nombre,
+                    ambito_id=ambito.identificador,
+                    linea_original=existente.linea_declaracion,
+                    columna_original=existente.columna_declaracion,
+                    linea_redeclaracion=linea,
+                    columna_redeclaracion=columna,
+                )
+            )
+            return existente
+
         simbolo = Symbol(
             nombre=nombre,
             clase=clase,
@@ -194,6 +227,10 @@ class SymbolTable:
                 uso.to_dict()
                 for uso in self.usos_no_resueltos
             ],
+            "redeclaraciones": [
+                redeclaracion.to_dict()
+                for redeclaracion in self.redeclaraciones
+            ],
         }
 
     def render(self) -> list[str]:
@@ -208,6 +245,18 @@ class SymbolTable:
                     f"ambito={uso.ambito_id}"
                 )
 
+        if self.redeclaraciones:
+            lineas.append("- Redeclaraciones")
+            for redeclaracion in self.redeclaraciones:
+                lineas.append(
+                    f"  - {redeclaracion.nombre} "
+                    f"[{redeclaracion.linea_redeclaracion}:"
+                    f"{redeclaracion.columna_redeclaracion}] "
+                    f"original=[{redeclaracion.linea_original}:"
+                    f"{redeclaracion.columna_original}] "
+                    f"ambito={redeclaracion.ambito_id}"
+                )
+
         return lineas
 
 
@@ -220,6 +269,7 @@ class SymbolTableBuilder:
         self.ast_codigo = ast_codigo
         self.tabla = SymbolTable()
         self.simbolos_externos = simbolos_externos or set()
+        self.funciones_definidas: set[str] = set()
 
     def construir(self) -> SymbolTable:
         for nombre in sorted(self.simbolos_externos):
@@ -245,11 +295,18 @@ class SymbolTableBuilder:
             return
 
         nombre = declaracion.atributos.get("name", "funcion_anonima")
-        self._declarar_desde_nodo(
-            declaracion,
-            self.tabla.ambito_global,
-            clase="funcion",
-        )
+        existente = self.tabla.ambito_global.buscar_local(nombre)
+        if (
+            existente is None
+            or existente.clase != "funcion"
+            or nombre in self.funciones_definidas
+        ):
+            self._declarar_desde_nodo(
+                declaracion,
+                self.tabla.ambito_global,
+                clase="funcion",
+            )
+        self.funciones_definidas.add(nombre)
         ambito_funcion = self.tabla.crear_ambito(
             clase="funcion",
             nombre=nombre,
@@ -294,7 +351,14 @@ class SymbolTableBuilder:
             return
 
         if nodo.tipo == "Decl":
-            clase = "funcion" if _es_declaracion_funcion(nodo) else "variable"
+            if _es_declaracion_funcion(nodo):
+                nombre = nodo.atributos.get("name")
+                existente = ambito.buscar_local(nombre) if nombre else None
+                if existente is None or existente.clase != "funcion":
+                    self._declarar_desde_nodo(nodo, ambito, clase="funcion")
+                return
+
+            clase = "variable"
             self._declarar_desde_nodo(nodo, ambito, clase=clase)
             for hijo in nodo.hijos:
                 if hijo.rol in {"init", "bitsize"}:

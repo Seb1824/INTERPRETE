@@ -255,6 +255,47 @@ def test_run_pipeline_json_con_codigo_invalido_conserva_diagnosticos(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("archivo", "tipo_error", "simbolo", "campo_tabla"),
+    [
+        (
+            "examples/redeclaracion.c",
+            "redeclaration",
+            "contador",
+            "redeclaraciones",
+        ),
+        (
+            "examples/variable_no_declarada.c",
+            "undeclared",
+            "total",
+            "usos_no_resueltos",
+        ),
+    ],
+)
+def test_pipeline_deduplica_reglas_semanticas_de_tabla_con_gcc(
+    tmp_path,
+    archivo,
+    tipo_error,
+    simbolo,
+    campo_tabla,
+):
+    ruta_json = tmp_path / f"{tipo_error}.json"
+
+    exit_code = run_pipeline(archivo, json_output=str(ruta_json))
+    reporte = json.loads(ruta_json.read_text(encoding="utf-8"))
+    coincidentes = [
+        diagnostico
+        for diagnostico in reporte["diagnosticos"]
+        if diagnostico["tipo_error"] == tipo_error
+        and diagnostico["simbolo"] == simbolo
+    ]
+
+    assert exit_code == 0
+    assert len(coincidentes) == 1
+    assert coincidentes[0]["origen"] == "gcc"
+    assert reporte["tabla_simbolos"][campo_tabla]
+
+
+@pytest.mark.parametrize(
     ("archivo", "tipo_esperado", "simbolo_esperado"),
     [
         (

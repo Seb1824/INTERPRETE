@@ -53,6 +53,8 @@ class ASTSemanticAnalyzer:
     def analizar(self) -> list[DiagnosticEntry]:
         diagnosticos = []
         diagnosticos.extend(self._analizar_cabeceras())
+        diagnosticos.extend(self._analizar_redeclaraciones())
+        diagnosticos.extend(self._analizar_usos_no_resueltos())
         diagnosticos.extend(self._analizar_division_cero())
         diagnosticos.extend(self._analizar_asignaciones_en_condiciones())
         diagnosticos.extend(self._analizar_simbolos_no_usados())
@@ -86,6 +88,56 @@ class ASTSemanticAnalyzer:
             ]
 
         return []
+
+    def _analizar_redeclaraciones(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+
+        for redeclaracion in self.tabla_simbolos.redeclaraciones:
+            diagnosticos.append(
+                DiagnosticEntry(
+                    archivo=self.ruta_fuente,
+                    linea=redeclaracion.linea_redeclaracion,
+                    columna=redeclaracion.columna_redeclaracion,
+                    severidad="error",
+                    mensaje_crudo=(
+                        f"analizador semantico AST: '{redeclaracion.nombre}' "
+                        "se declaro mas de una vez en el mismo ambito; "
+                        "la declaracion original esta en la linea "
+                        f"{redeclaracion.linea_original}"
+                    ),
+                    tipo_error="redeclaration",
+                    simbolo=redeclaracion.nombre,
+                    origen="semantico",
+                )
+            )
+
+        return diagnosticos
+
+    def _analizar_usos_no_resueltos(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+
+        for uso in self.tabla_simbolos.usos_no_resueltos:
+            if uso.nombre in _FUNCIONES_STDIO:
+                continue
+
+            diagnosticos.append(
+                DiagnosticEntry(
+                    archivo=self.ruta_fuente,
+                    linea=uso.linea,
+                    columna=uso.columna,
+                    severidad="error",
+                    mensaje_crudo=(
+                        f"analizador semantico AST: el identificador "
+                        f"'{uso.nombre}' se uso sin una declaracion visible "
+                        "en este ambito"
+                    ),
+                    tipo_error="undeclared",
+                    simbolo=uso.nombre,
+                    origen="semantico",
+                )
+            )
+
+        return diagnosticos
 
     def _analizar_division_cero(self) -> list[DiagnosticEntry]:
         diagnosticos = []

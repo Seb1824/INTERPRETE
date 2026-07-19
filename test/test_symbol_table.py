@@ -59,6 +59,105 @@ def test_tabla_resuelve_sombreado_en_ambito_mas_cercano(tmp_path):
     assert len(simbolos_valor) == 2
     assert simbolos_valor[0].ambito_id != simbolos_valor[1].ambito_id
     assert [simbolo.cantidad_usos for simbolo in simbolos_valor] == [1, 1]
+    assert tabla.redeclaraciones == []
+
+
+def test_tabla_detecta_redeclaracion_en_el_mismo_ambito(tmp_path):
+    fuente = tmp_path / "redeclaracion.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    int valor = 1;\n"
+        "    int valor = 2;\n"
+        "    return valor;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    tabla = construir_tabla_simbolos(construir_ast_codigo(str(fuente)))
+    ambito_main = next(
+        ambito
+        for ambito in tabla.todos_los_ambitos()
+        if ambito.clase == "funcion" and ambito.nombre == "main"
+    )
+    simbolos_valor = [
+        simbolo
+        for simbolo in ambito_main.simbolos
+        if simbolo.nombre == "valor"
+    ]
+
+    assert len(simbolos_valor) == 1
+    assert simbolos_valor[0].cantidad_usos == 1
+    assert len(tabla.redeclaraciones) == 1
+    assert tabla.redeclaraciones[0].nombre == "valor"
+    assert tabla.redeclaraciones[0].linea_original == 2
+    assert tabla.redeclaraciones[0].linea_redeclaracion == 3
+
+
+def test_semantico_convierte_redeclaracion_en_diagnostico(tmp_path):
+    fuente = tmp_path / "redeclaracion_semantica.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    int contador = 0;\n"
+        "    int contador = 1;\n"
+        "    return contador;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    redeclaracion = next(
+        diagnostico
+        for diagnostico in diagnosticos
+        if diagnostico.tipo_error == "redeclaration"
+    )
+
+    assert redeclaracion.simbolo == "contador"
+    assert redeclaracion.linea == 3
+    assert redeclaracion.severidad == "error"
+    assert redeclaracion.origen == "semantico"
+    assert "linea 2" in redeclaracion.mensaje_crudo
+
+
+def test_semantico_convierte_uso_no_resuelto_en_diagnostico(tmp_path):
+    fuente = tmp_path / "no_declarada.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    return total;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    analizador = SemanticAnalyzer(str(fuente))
+    diagnosticos = analizador.analizar()
+    no_declarado = next(
+        diagnostico
+        for diagnostico in diagnosticos
+        if diagnostico.tipo_error == "undeclared"
+    )
+
+    assert no_declarado.simbolo == "total"
+    assert no_declarado.linea == 2
+    assert no_declarado.severidad == "error"
+    assert no_declarado.origen == "semantico"
+    assert analizador.tabla_simbolos is not None
+    assert analizador.tabla_simbolos.usos_no_resueltos[0].nombre == "total"
+
+
+def test_tabla_acepta_prototipo_seguido_de_definicion(tmp_path):
+    fuente = tmp_path / "prototipo.c"
+    fuente.write_text(
+        "int sumar(int numero);\n"
+        "int main() { return sumar(2); }\n"
+        "int sumar(int numero) { return numero; }\n",
+        encoding="utf-8",
+    )
+
+    analizador = SemanticAnalyzer(str(fuente))
+    diagnosticos = analizador.analizar()
+
+    assert analizador.tabla_simbolos is not None
+    assert analizador.tabla_simbolos.redeclaraciones == []
+    assert diagnosticos == []
 
 
 def test_semantico_reporta_solo_simbolo_sombreado_no_usado(tmp_path):
@@ -173,6 +272,7 @@ def test_tabla_exporta_jerarquia_y_render(tmp_path):
 
     assert datos["ambito_global"]["clase"] == "global"
     assert datos["ambito_global"]["hijos"][0]["clase"] == "funcion"
+    assert datos["redeclaraciones"] == []
     assert any("numero: int" in linea for linea in renderizado)
 
 
