@@ -81,6 +81,13 @@ _TIPOS_C = {
 _PATRONES_TIPO = [
     (
         re.compile(
+            r"assignment used as truth value|assignment in conditional expression",
+            re.IGNORECASE,
+        ),
+        "assignment_in_condition",
+    ),
+    (
+        re.compile(
             r"format .* expects argument|format specifies type|too many arguments for format|"
             r"too few arguments for format|unknown conversion type character",
             re.IGNORECASE,
@@ -237,6 +244,9 @@ def _extraer_simbolo_especifico(
 
     if tipo_error == "missing_return" and funcion_contexto:
         return funcion_contexto
+
+    if tipo_error == "assignment_in_condition":
+        return "="
 
     if tipo_error == "type_mismatch":
         variable = _extraer_variable_de_declaracion(linea_fuente)

@@ -41,6 +41,7 @@ TODOS_LOS_TIPOS = [
     "uninitialized_variable",
     "struct_access",
     "preprocessor_error",
+    "assignment_in_condition",
     "desconocido",
 ]
 
@@ -247,6 +248,39 @@ class TestDivisionByZero:
         entry = make_entry("division_by_zero", linea=15)
         r = explain(entry)
         assert "15" in r["explicacion"] or "15" in r["sugerencia"]
+
+
+class TestAssignmentInCondition:
+    def test_explica_diferencia_entre_asignar_y_comparar(self):
+        entry = make_entry("assignment_in_condition", simbolo="=")
+
+        resultado = explain(entry)
+        texto = resultado["explicacion"] + resultado["sugerencia"]
+
+        assert "asigna" in texto.lower()
+        assert "==" in texto
+
+    def test_sugerencia_corrige_solo_la_asignacion(self, tmp_path):
+        fuente = tmp_path / "condicion.c"
+        fuente.write_text(
+            "int main() {\n"
+            "    int x = 0; if (x = 1 && x >= 0) {\n"
+            "        return 1;\n"
+            "    }\n"
+            "    return 0;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        entry = make_entry(
+            "assignment_in_condition",
+            simbolo="=",
+            linea=2,
+            archivo=str(fuente),
+        )
+
+        resultado = explain(entry)
+
+        assert "int x = 0; if (x == 1 && x >= 0)" in resultado["sugerencia"]
 
 
 class TestDesconocido:

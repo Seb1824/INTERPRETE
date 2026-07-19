@@ -1,7 +1,9 @@
 from __future__ import annotations
-from src.parser import DiagnosticEntry
 import inspect
+import re
 from pathlib import Path
+
+from src.parser import DiagnosticEntry
 
 def _extraer_linea_cruda(archivo: str, numero_linea: int) -> str:
     """Lee el archivo y extrae la línea exacta de código limpiando espacios."""
@@ -450,7 +452,12 @@ def _explain_desconocido(entry):
 
 def _explain_assignment_in_condition(entry, linea_codigo=""):
     if linea_codigo:
-        linea_corregida = linea_codigo.replace("=", "==")
+        linea_corregida = re.sub(
+            r"(\b(?:if|while)\s*\([^)]*?)(?<![=!<>+\-*/%&|^])=(?!=)",
+            r"\1==",
+            linea_codigo,
+            count=1,
+        )
         sugerencia_dinamica = (
             f"Cambia la asignación '=' por una comparación '=='. Debería quedar así:\n"
             f"    {linea_corregida}"
@@ -461,11 +468,14 @@ def _explain_assignment_in_condition(entry, linea_codigo=""):
     return {
         "titulo": "Asignación '=' en lugar de comparación '=='",
         "explicacion": (
-            "Estás usando un solo '=' dentro de una condición. Esto asigna el valor a la "
-            "variable en lugar de comparar, lo que hace que la condición casi siempre sea "
-            "verdadera y arruine la lógica del programa."
+            "Estás usando un solo '=' dentro de una condición. Esto asigna un valor a la "
+            "variable y luego evalúa ese valor, en lugar de comparar los dos operandos. "
+            "El flujo del programa puede ser distinto al esperado."
         ),
-        "causa_probable": "Es un clásico error de tipeo. Querías comparar valores (usando '==') pero escribiste una asignación (con un solo '=').",
+        "causa_probable": (
+            "Probablemente querías comparar valores con '==', pero escribiste una "
+            "asignación con un solo '='."
+        ),
         "sugerencia": sugerencia_dinamica,
     }
 

@@ -27,6 +27,13 @@ _PATRON_DECLARACION = re.compile(
     rf"\b(?:{'|'.join(_TIPOS_C)})(?:\s+(?:{'|'.join(_TIPOS_C)}))*\s+\*?\s*"
     r"(?P<nombre>[A-Za-z_][A-Za-z0-9_]*)\b"
 )
+_PATRON_ASIGNACION_CONDICION = re.compile(
+    r"\b(?:if|while)\s*\([^)]*?"
+    r"(?P<operador>(?<![=!<>+\-*/%&|^])=(?!=))"
+)
+_PATRON_INCLUDE_STDIO = re.compile(r'#include\s*[<"]stdio\.h[>"]')
+_PATRON_FUNCION_IO = re.compile(r"\b(?P<funcion>printf|scanf)\b")
+_PATRON_DIVISION_CERO = re.compile(r"/\s*0(?:\.0+)?\b")
 _PALABRAS_RESERVADAS = {
     "else",
     "for",
@@ -60,34 +67,34 @@ class SemanticAnalyzer:
 
         diagnosticos: list[DiagnosticEntry] = []
 
-        diagnosticos.extend(self._analizar_cabeceras(lineas, lineas_limpias))
+        diagnosticos.extend(self._analizar_cabeceras(lineas_limpias))
         diagnosticos.extend(self._analizar_division_cero(lineas_limpias))
         diagnosticos.extend(self._analizar_asignacion_condicion(lineas_limpias))
- 
 
         for funcion in funciones:
             diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
-            diagnosticos.extend(self._analizar_tipo_main(funcion)) 
+            diagnosticos.extend(self._analizar_tipo_main(funcion))
 
         return diagnosticos
 
     def _analizar_asignacion_condicion(self, lineas_limpias: list[str]) -> list[DiagnosticEntry]:
         diagnosticos: list[DiagnosticEntry] = []
-        import re
-        patron_asignacion = re.compile(r'\b(?:if|while)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*[^=].*\)')
 
         for i, linea in enumerate(lineas_limpias):
-            match = patron_asignacion.search(linea)
+            match = _PATRON_ASIGNACION_CONDICION.search(linea)
             if match:
                 diagnosticos.append(
                     DiagnosticEntry(
                         archivo=self.ruta_fuente,
                         linea=i + 1,
-                        columna=match.start() + 1,
+                        columna=match.start("operador") + 1,
                         severidad="warning",
-                        mensaje_crudo="analizador semantico: posible asignacion '=' en lugar de comparacion '=='",
-                        tipo_error="assignment_in_condition", # Reutilizamos esta categoría
+                        mensaje_crudo=(
+                            "analizador semantico: posible asignacion '=' "
+                            "en lugar de comparacion '=='"
+                        ),
+                        tipo_error="assignment_in_condition",
                         simbolo="=",
                         origen="semantico",
                     )
@@ -156,59 +163,62 @@ class SemanticAnalyzer:
                 origen="semantico",
             )
         ]
+
     def _analizar_tipo_main(self, funcion: _Funcion) -> list[DiagnosticEntry]:
-        if funcion.nombre == "main" and funcion.tipo_retorno.strip() == "void":
-            return [
-                DiagnosticEntry(
-                    archivo=self.ruta_fuente,
-                    linea=funcion.linea_inicio,
-                    columna=funcion.columna_inicio,
-                    severidad="warning",
-                    mensaje_crudo=(
-                        "analizador semantico: la funcion principal 'main' "
-                        "deberia retornar 'int' en lugar de 'void'"
-                    ),
-                    tipo_error="return_error",
-                    simbolo="main",
-                    origen="semantico",
-                )
-            ]
-        return []
-    
-    def _analizar_cabeceras(self, lineas: list[str], lineas_limpias: list[str]) -> list[DiagnosticEntry]:
-        tiene_stdio = any(re.search(r'#include\s*[<"]stdio\.h[>"]', linea) for linea in lineas)
-        
+        if funcion.nombre != "main" or funcion.tipo_retorno.strip() != "void":
+            return []
+
+        return [
+            DiagnosticEntry(
+                archivo=self.ruta_fuente,
+                linea=funcion.linea_inicio,
+                columna=funcion.columna_inicio,
+                severidad="warning",
+                mensaje_crudo=(
+                    "analizador semantico: la funcion principal 'main' "
+                    "deberia retornar 'int' en lugar de 'void'"
+                ),
+                tipo_error="return_error",
+                simbolo="main",
+                origen="semantico",
+            )
+        ]
+
+    def _analizar_cabeceras(self, lineas_limpias: list[str]) -> list[DiagnosticEntry]:
+        tiene_stdio = any(
+            _PATRON_INCLUDE_STDIO.search(linea)
+            for linea in lineas_limpias
+        )
+
         if tiene_stdio:
             return []
 
-        patron_io = re.compile(r'\b(printf|scanf)\b')
         for i, linea in enumerate(lineas_limpias):
-            match = patron_io.search(linea)
+            match = _PATRON_FUNCION_IO.search(linea)
             if match:
-                simbolo_usado = match.group(1)
+                simbolo_usado = match.group("funcion")
                 return [
                     DiagnosticEntry(
                         archivo=self.ruta_fuente,
                         linea=i + 1,
-                        columna=match.start(1) + 1,
+                        columna=match.start("funcion") + 1,
                         severidad="error",
                         mensaje_crudo=(
                             f"analizador semantico: se uso '{simbolo_usado}' "
                             "sin incluir la biblioteca <stdio.h>"
                         ),
-                        tipo_error="implicit_declaration", 
+                        tipo_error="implicit_declaration",
                         simbolo=simbolo_usado,
                         origen="semantico",
                     )
                 ]
         return []
-    
+
     def _analizar_division_cero(self, lineas_limpias: list[str]) -> list[DiagnosticEntry]:
         diagnosticos: list[DiagnosticEntry] = []
-        patron_div_cero = re.compile(r'/\s*0(?:\.0+)?\b')
 
         for i, linea in enumerate(lineas_limpias):
-            match = patron_div_cero.search(linea)
+            match = _PATRON_DIVISION_CERO.search(linea)
             if match:
                 diagnosticos.append(
                     DiagnosticEntry(
@@ -219,12 +229,13 @@ class SemanticAnalyzer:
                         mensaje_crudo=(
                             "analizador semantico: division directa por cero literal detectada"
                         ),
-                        tipo_error="division_by_zero", 
+                        tipo_error="division_by_zero",
                         simbolo="/",
                         origen="semantico",
                     )
                 )
         return diagnosticos
+
 
 def _limpiar_comentarios_y_cadenas(lineas: list[str]) -> list[str]:
     limpias: list[str] = []

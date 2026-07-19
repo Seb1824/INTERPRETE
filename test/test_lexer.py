@@ -233,6 +233,10 @@ def test_lexer_informa_error_de_lectura(monkeypatch):
             "fatal error: biblioteca_inexistente.h: No such file or directory",
             "preprocessor_error",
         ),
+        (
+            "suggest parentheses around assignment used as truth value [-Wparentheses]",
+            "assignment_in_condition",
+        ),
     ],
 )
 def test_lexer_clasifica_nuevos_mensajes_gcc(mensaje, tipo_esperado):
@@ -318,6 +322,13 @@ def test_archivo_con_extension_c_mayuscula_se_clasifica():
             None,
             "format_mismatch",
             "%d",
+        ),
+        (
+            "ejemplo.c:4:9: warning: suggest parentheses around assignment "
+            "used as truth value [-Wparentheses]",
+            None,
+            "assignment_in_condition",
+            "=",
         ),
     ],
 )
