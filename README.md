@@ -1,210 +1,172 @@
-# Proyecto de compiladores orientado a analizar y mejorar mensajes de error generados por GCC para programas en C.
+# Analizador educativo de errores de C
 
-El sistema no implementa todavia un compilador completo ni un lenguaje propio. Actualmente trabaja sobre la salida de GCC: analiza un archivo `.c`, captura `stderr`, tokeniza los mensajes, los transforma en diagnosticos estructurados y genera explicaciones en espanol pensadas para estudiantes principiantes.
+Proyecto orientado a analizar y mejorar los mensajes de error que GCC genera
+al revisar programas escritos en C. El sistema transforma diagnosticos
+tecnicos en explicaciones en espanol dirigidas a estudiantes principiantes.
 
-## Estado Actual
+El proyecto puede utilizarse desde una interfaz de linea de comandos o desde
+una interfaz web local.
 
-El pipeline implementado es:
+## Alcance del proyecto
 
-```text
-archivo .c -> GCC -> stderr -> Lexer -> Parser -> Analizador semantico -> arbol de diagnostico -> Explainer -> mensajes mejorados
-```
+Este sistema no es un compilador completo ni un interprete. Es un analizador
+estatico educativo y un transformador de diagnosticos que combina:
 
-El avance actual incluye:
+- GCC como compilador y fuente de diagnosticos reales.
+- Un lexer propio para tokenizar la salida de GCC.
+- Un parser propio para construir diagnosticos estructurados.
+- Un AST real del codigo C construido con `pycparser`.
+- Una tabla de simbolos propia con ambitos lexicos.
+- Reglas de analisis semantico desarrolladas en el proyecto.
+- Un generador de explicaciones pedagogicas en espanol.
+- Salidas para terminal, JSON e interfaz web.
 
-1. Ejecucion automatica de GCC sobre archivos C.
-2. Captura del `stderr` generado por GCC.
-3. Analisis lexico de mensajes `error`, `warning` y `note`.
-4. Clasificacion de errores frecuentes.
-5. Extraccion de simbolos relevantes.
-6. Analisis sintactico para construir `DiagnosticEntry`.
-7. Generacion de explicaciones en espanol con causa probable y sugerencia.
-8. Agrupacion de `note` de GCC como informacion secundaria del diagnostico anterior.
-9. Modo estudiante por defecto, mostrando solo mensajes mejorados.
-10. Modo `--debug`, mostrando `stderr`, tokens y diagnosticos tecnicos.
-11. Contexto de codigo fuente con linea y marcador `^`.
-12. Ejemplos separados por tipo de error.
-13. Pruebas unitarias e integracion basica del flujo.
-14. Manejo controlado de archivos invalidos, GCC ausente, errores de lectura y timeout.
-15. Mensaje especifico cuando el codigo no contiene errores ni advertencias.
-16. Resumen con diagnosticos clasificados, desconocidos y porcentaje de cobertura.
-17. Clasificacion ampliada y comprobada con archivos C reales.
-18. Compilacion temporal sin enlace y sin dejar archivos objeto en el proyecto.
-19. Diferenciacion visible entre errores y advertencias.
-20. Exportacion de resultados estructurados a JSON.
-21. Arbol sintactico de diagnosticos para representar la estructura interna de cada error.
-22. Analisis semantico propio para detectar advertencias simples sin depender solo de GCC.
-23. Deduplicacion cruzada e inteligente de diagnosticos internos de GCC mediante diccionarios (priorizando errores sobre advertencias).
-24. Deteccion estatica de division por cero literal mediante analisis de expresiones regulares.
-25. Sugerencias dinamicas que extraen el codigo fuente real del estudiante para mostrar correcciones in-line.
-26. Identificacion explicita de bibliotecas faltantes (como <stdio.h>) al invocar funciones estandar.
+El objetivo no es reemplazar a GCC, sino usar su precision tecnica y agregar
+una capa educativa que explique el problema, su causa probable y una forma de
+corregirlo.
 
-## Estructura Del Proyecto
+## Arquitectura actual
 
 ```text
-COMPILADOR/
-├── main.py
-├── README.md
-├── examples/
-│   ├── correcto.c
-│   ├── error_lexico.c
-│   ├── acceso_estructura.c
-│   ├── argumentos_incorrectos.c
-│   ├── conversion_peligrosa.c
-│   ├── delimitador_desbalanceado.c
-│   ├── division_por_cero.c
-│   ├── error_preprocesador.c
-│   ├── error_puntero.c
-│   ├── extension_mayuscula.C
-│   ├── falta_punto_y_coma.c
-│   ├── falta_retorno.c
-│   ├── formato_printf.c
-│   ├── funcion_implicita.c
-│   ├── redeclaracion.c
-│   ├── retorno_incorrecto.c
-│   ├── semantico_asignacion.c
-│   ├── semantico_division_cero.c
-│   ├── semantico_falta_stdio.c
-│   ├── tipo_incompatible.c
-│   ├── variable_no_declarada.c
-│   ├── variable_no_inicializada.c
-│   └── variable_no_usada.c
-├── src/
-│   ├── __init__.py
-│   ├── explainer.py
-│   ├── lexer.py
-│   ├── parser.py
-│   ├── semantic.py
-│   └── token.py
-└── test/
-    ├── conftest.py
-    ├── test_explainer.py
-    ├── test_lexer.py
-    ├── test_main.py
-    └── test_parser.py
+                         +---------------------+
+                         | Archivo o codigo C  |
+                         +----------+----------+
+                                    |
+                  +-----------------+-----------------+
+                  |                                   |
+          +-------v-------+                   +-------v-------+
+          |      GCC      |                   |   pycparser   |
+          +-------+-------+                   +-------+-------+
+                  |                                   |
+             stderr real                          AST de C
+                  |                                   |
+          +-------v-------+                   +-------v-------+
+          | Lexer de GCC  |                   | Tabla simbolos|
+          +-------+-------+                   +-------+-------+
+                  |                                   |
+               tokens                         Analisis semantico
+                  |                                   |
+          +-------v-------+                           |
+          |    Parser     |                           |
+          +-------+-------+                           |
+                  |                                   |
+          Diagnosticos GCC                            |
+                  +-----------------+-----------------+
+                                    |
+                          Deduplicacion y union
+                                    |
+                         +----------v----------+
+                         |     Explainer       |
+                         +----------+----------+
+                                    |
+                +-------------------+-------------------+
+                |                   |                   |
+              CLI                 JSON            Interfaz web
 ```
 
-## Componentes
+El punto comun para CLI y web es `src/analyzer.py`. Su funcion
+`analizar_archivo()` ejecuta el pipeline y devuelve un `AnalysisResult` con
+todos los productos intermedios y finales.
 
-### `main.py`
+## Funcionalidades implementadas
 
-Punto de entrada del proyecto.
+### Procesamiento con GCC
 
-Ejecuta el flujo completo:
+- Ejecucion automatica de GCC sobre archivos `.c` y `.C`.
+- Forzado del lenguaje C mediante `-x c`, incluso para extension `.C`.
+- Activacion de advertencias con `-Wall`, `-Wextra`, `-Wconversion`,
+  `-Wuninitialized` y `-Wreturn-type`.
+- Compilacion sin enlace y generacion del objeto en un directorio temporal.
+- Eliminacion automatica del objeto temporal.
+- Captura completa de `stderr`.
+- Tiempo maximo de ejecucion de GCC de 10 segundos.
+- Configuracion de GCC en ingles para mantener estable la clasificacion.
+- Manejo controlado de GCC ausente, timeout y errores de ejecucion.
 
-```text
-.c -> GCC -> Lexer -> Parser -> Explainer
-```
+El programa del estudiante nunca se ejecuta. GCC solo lo compila con `-c` para
+obtener diagnosticos.
 
-Por defecto muestra una salida limpia para estudiantes:
+### Analisis lexico de diagnosticos
 
-- etiqueta `[ERROR]` o `[ADVERTENCIA]`
-- titulo del problema
-- ubicacion
-- contexto de codigo
-- explicacion
-- causa probable
-- sugerencia
-- notas de GCC asociadas, si existen
-- resumen de cobertura de clasificacion
-
-Tambien soporta modo debug con `--debug`.
-
-Antes de ejecutar GCC valida que:
-
-- la ruta exista
-- la ruta corresponda a un archivo
-- el archivo tenga extension `.c`
-- el archivo pueda leerse como UTF-8
-
-Aplica una deduplicacion inteligente cruzando los analisis de GCC. Si GCC emite una advertencia redundante para un error ya registrado en la misma linea y para el mismo simbolo, el sistema la filtra priorizando siempre el error.
-
-Tambien muestra errores controlados si GCC no esta instalado, no puede ejecutarse o excede el tiempo maximo.
-
-### `src/lexer.py`
-
-Ejecuta GCC en modo de compilacion sin enlace con:
-
-```bash
-gcc -x c -O1 -Wall -Wextra -Wconversion -Wuninitialized -Wreturn-type -c archivo.c
-```
-
-La opcion `-x c` fuerza el analisis como lenguaje C, incluso cuando el archivo usa la extension `.C`. El archivo objeto se escribe dentro de un directorio temporal que se elimina automaticamente. De esta forma se activan analisis de flujo como variables no inicializadas y funciones sin retorno, sin dejar archivos `.o` en el proyecto.
-
-La ejecucion tiene un tiempo maximo de 10 segundos. Luego se tokeniza la salida de GCC.
-
-Reconoce mensajes con formato:
+El lexer procesa lineas con este formato:
 
 ```text
 archivo.c:linea:columna: severidad: mensaje
 ```
 
-Clasifica errores frecuentes:
+Genera tokens para:
 
-- `undeclared`
-- `expected_token`
-- `implicit_declaration`
-- `type_mismatch`
-- `wrong_arguments`
-- `unused_variable`
-- `return_error`
-- `redeclaration`
-- `division_by_zero`
-- `pointer_error`
-- `format_mismatch`
-- `unbalanced_delimiter`
-- `missing_return`
-- `dangerous_conversion`
-- `uninitialized_variable`
-- `struct_access`
-- `preprocessor_error`
-- `desconocido`
+- archivo
+- linea
+- columna
+- severidad
+- mensaje crudo
+- tipo de error
+- simbolo relacionado
+- contenido desconocido
 
-La severidad `fatal error` de GCC se normaliza como `error`.
+Las lineas de contexto que imprime GCC no se convierten en diagnosticos. Las
+`note` se conservan como informacion secundaria y se adjuntan al error o
+advertencia anterior.
 
-Tambien evita usar tipos de C como simbolos. Por ejemplo, en:
+### Categorias reconocidas
 
-```text
-initialization of 'int' from 'char *'
-```
+El sistema clasifica actualmente:
 
-no toma `int` como simbolo. Si puede leer la linea fuente, extrae la variable afectada, por ejemplo `z` en:
+- `undeclared`: variable o funcion no declarada.
+- `implicit_declaration`: funcion utilizada sin declaracion o cabecera.
+- `redeclaration`: identificador declarado mas de una vez.
+- `expected_token`: token esperado, incluido el punto y coma.
+- `type_mismatch`: tipos incompatibles.
+- `wrong_arguments`: cantidad incorrecta de argumentos.
+- `return_error`: retorno incompatible o declaracion incorrecta de `main`.
+- `unused_variable`: variable o parametro no utilizado.
+- `division_by_zero`: division por cero.
+- `pointer_error`: uso incorrecto de punteros.
+- `format_mismatch`: formato incorrecto en `printf` o funciones similares.
+- `unbalanced_delimiter`: llaves, parentesis o delimitadores desbalanceados.
+- `missing_return`: funcion no `void` que puede terminar sin retornar.
+- `dangerous_conversion`: conversion que puede perder informacion.
+- `uninitialized_variable`: variable posiblemente no inicializada.
+- `struct_access`: acceso incorrecto a estructuras o miembros inexistentes.
+- `preprocessor_error`: errores de cabeceras, macros o directivas.
+- `assignment_in_condition`: posible uso de `=` en lugar de `==`.
+- `desconocido`: diagnostico que aun no tiene una categoria especifica.
+
+### Extraccion de simbolos
+
+La extraccion evita utilizar tipos de C como si fueran nombres de variables.
+Tambien cuenta con reglas especificas para obtener:
+
+- variable afectada por una conversion o incompatibilidad
+- variable posiblemente no inicializada
+- operando de una desreferencia incorrecta
+- miembro inexistente de una estructura
+- funcion con argumentos incorrectos
+- funcion sin retorno
+- archivo de cabecera faltante
+- especificador de formato incorrecto
+
+Por ejemplo, para:
 
 ```c
 int z = "hola";
 ```
 
-Para las categorias ampliadas realiza extraccion especifica:
+el simbolo extraido es `z`, no `int`.
 
-- variable no inicializada: `numero`
-- miembro inexistente de estructura: `altura`
-- funcion sin retorno: `calcular`
-- cabecera faltante: `biblioteca_inexistente.h`
-- especificador de formato incorrecto: `%d`
+### Parser y arbol de diagnosticos
 
-El nombre de la funcion se obtiene del contexto `In function 'nombre':` que GCC imprime antes del diagnostico.
+El parser agrupa los tokens en objetos `DiagnosticEntry` con:
 
-### `src/parser.py`
+- archivo, linea y columna
+- severidad
+- mensaje original
+- categoria
+- simbolo
+- origen: `gcc` o `semantico`
 
-Agrupa tokens consecutivos en objetos `DiagnosticEntry` y construye un arbol sintactico simple para cada diagnostico.
-
-Formato esperado:
-
-```text
-ARCHIVO LINEA COLUMNA SEVERIDAD MENSAJE_CRUDO TIPO_ERROR [SIMBOLO]
-```
-
-Cada diagnostico contiene:
-
-- `archivo`
-- `linea`
-- `columna`
-- `severidad`
-- `mensaje_crudo`
-- `tipo_error`
-- `simbolo`
-
-El arbol de diagnostico no es un AST completo del lenguaje C. Es una representacion jerarquica del mensaje procesado por el sistema:
+Ademas construye un arbol para cada diagnostico:
 
 ```text
 Diagnostico
@@ -214,253 +176,517 @@ Diagnostico
     Columna
   Severidad
   TipoError
+  Origen
   Simbolo
   MensajeGCC
   ContextoFuente
   NotasGCC
 ```
 
-Esta estructura permite mostrar que el parser no deja la salida como texto plano, sino que organiza cada diagnostico en partes reconocibles.
+Este arbol representa la estructura del diagnostico. No debe confundirse con
+el AST del programa C.
 
-### `src/semantic.py`
+### AST del codigo C
 
-Realiza un analisis semantico basico directamente sobre el codigo fuente. No reemplaza a GCC, sino que complementa sus diagnosticos con reglas propias del proyecto.
+`src/ast_builder.py` construye un AST real del archivo C mediante
+`pycparser`.
 
-Actualmente detecta:
+Antes de analizar:
 
-- variables locales declaradas pero no utilizadas
-- funciones no void que pueden terminar sin retornar un valor
-- division directa por cero literal usando analisis de expresiones regulares
-- asignaciones erradas = en lugar de comparaciones == en condiciones de if/while
+- reemplaza comentarios por espacios
+- reemplaza directivas del preprocesador por espacios
+- conserva lineas y columnas originales
 
-Los diagnosticos generados por este modulo usan `origen="semantico"`. Antes de mostrarlos, `main.py` los combina con los diagnosticos de GCC y evita duplicados claros por tipo de error, simbolo y ubicacion.
+Cada nodo del AST almacena:
 
-Esto permite separar mejor las etapas del proyecto:
+- tipo de nodo
+- rol respecto al padre
+- atributos
+- linea y columna
+- nodos hijos
+
+El AST se puede visualizar en modo debug y se incluye completo en la salida
+JSON. Si el codigo tiene un error sintactico que impide construirlo, el sistema
+conserva los diagnosticos de GCC y activa un respaldo semantico basado en
+expresiones regulares.
+
+### Tabla de simbolos con ambitos
+
+`src/symbol_table.py` recorre el AST y construye una tabla jerarquica con:
+
+- ambito global
+- ambitos de funciones
+- ambitos de bloques
+- ambitos de ciclos `for`
+
+Registra:
+
+- variables globales y locales
+- parametros
+- funciones y funciones externas conocidas
+- `typedef`
+- constantes de enumeraciones
+- tipo de dato
+- ubicacion de la declaracion
+- ubicaciones de cada uso
+- cantidad de usos
+
+La resolucion de un identificador comienza en el ambito actual y continua
+hacia sus padres. Esto permite manejar correctamente el sombreado de variables.
+
+La tabla tambien registra:
+
+- usos de identificadores sin declaracion visible
+- redeclaraciones en el mismo ambito
+- linea de la declaracion original y de la duplicada
+
+Un prototipo seguido por la definicion de la misma funcion se acepta como un
+caso valido.
+
+### Analisis semantico propio
+
+El analizador semantico usa el AST y la tabla de simbolos para detectar, sin
+depender exclusivamente de GCC:
+
+- variables locales no utilizadas
+- parametros no utilizados
+- redeclaraciones en el mismo ambito
+- identificadores sin declaracion visible
+- divisiones por expresiones constantes iguales a cero
+- asignaciones dentro de condiciones
+- funciones no `void` que pueden terminar sin retornar
+- declaracion `void main`
+- uso de funciones conocidas de entrada/salida sin incluir `<stdio.h>`
+
+La evaluacion de constantes soporta numeros, operadores unarios, sumas,
+restas, multiplicaciones, divisiones, modulo y conversiones simples.
+
+Cuando el AST no puede construirse, `src/semantic.py` aplica un conjunto mas
+limitado de reglas con expresiones regulares.
+
+### Deduplicacion
+
+GCC y el analizador semantico pueden encontrar el mismo problema. Antes de
+mostrar resultados, `src/analyzer.py` normaliza rutas y elimina duplicados por:
+
+- archivo
+- categoria
+- linea
+- simbolo
+
+Cuando GCC ya tiene el diagnostico equivalente, se conserva el mensaje de GCC
+y no se agrega una segunda tarjeta semantica.
+
+### Explicaciones pedagogicas
+
+`src/explainer.py` transforma cada diagnostico en:
+
+- titulo comprensible
+- explicacion del problema
+- causa probable
+- sugerencia de correccion
+- contexto de la linea fuente
+
+Algunas sugerencias utilizan la linea real del estudiante para proponer una
+correccion mas concreta.
+
+### Modos de salida
+
+El proyecto ofrece:
+
+- modo estudiante por defecto
+- modo debug para inspeccionar todas las etapas
+- exportacion JSON
+- interfaz web local
+
+Los errores y advertencias se distinguen mediante etiquetas visibles, no solo
+por color.
+
+## Interfaz web
+
+La aplicacion Flask esta definida en `web_app.py` y ofrece:
+
+- editor para escribir o pegar codigo C
+- carga de archivos `.c` y `.C`
+- limite de entrada de 512 KB
+- validacion de extension y UTF-8
+- procesamiento dentro de un directorio temporal
+- resumen de errores, advertencias y cobertura
+- mensajes mejorados con contexto de codigo
+- notas de GCC asociadas
+- seccion desplegable con AST y tabla de simbolos
+- diseno responsive para escritorio y movil
+
+La interfaz incluye fundamentos de accesibilidad:
+
+- HTML semantico
+- etiquetas asociadas a controles
+- navegacion por teclado
+- foco visible
+- enlace para saltar al contenido
+- regiones `role="status"` y `role="alert"`
+- indicadores textuales ademas del color
+- soporte para preferencia de movimiento reducido
+
+La sintesis de voz todavia no esta implementada. Esta prevista como una mejora
+posterior para complementar lectores de pantalla.
+
+## Estructura del repositorio
 
 ```text
-Lexer: extrae tokens desde stderr de GCC
-Parser: agrupa tokens en DiagnosticEntry
-Semantico: analiza reglas simples del codigo fuente
-Explainer: transforma diagnosticos en explicaciones pedagogicas
+COMPILADOR/
+|-- main.py                    # Entrada de linea de comandos
+|-- web_app.py                 # Aplicacion Flask
+|-- requirements.txt          # Dependencias de ejecucion
+|-- requirements-dev.txt      # Dependencias de pruebas
+|-- README.md
+|-- src/
+|   |-- analyzer.py            # API comun y union de resultados
+|   |-- ast_builder.py         # Construccion del AST de C
+|   |-- explainer.py           # Explicaciones pedagogicas
+|   |-- lexer.py               # Ejecucion de GCC y tokenizacion
+|   |-- parser.py              # Diagnosticos y arbol de diagnostico
+|   |-- semantic.py            # Coordinador y respaldo textual
+|   |-- semantic_ast.py        # Reglas semanticas sobre el AST
+|   |-- symbol_table.py        # Tabla de simbolos y ambitos
+|   `-- token.py               # Tipos de token
+|-- templates/
+|   `-- index.html             # Vista principal de la interfaz
+|-- static/
+|   |-- app.js                 # Interaccion del editor y carga
+|   `-- styles.css             # Diseno responsive y accesible
+|-- examples/                  # Programas C de demostracion
+|-- outputs/                   # JSON generados, ignorados por Git
+`-- test/                      # Pruebas automatizadas
 ```
 
-### `src/explainer.py`
-
-Convierte un `DiagnosticEntry` en una explicacion pedagogica en espanol.
-Mediante introspeccion (inspect) y la extraccion de la linea cruda, el explainer es capaz de nutrirse del contexto dinamico del archivo fuente para ofrecer soluciones "in-line" precisas (como reescribir la linea del estudiante con el `;` que faltaba).
-
-Retorna:
-
-- `titulo`
-- `explicacion`
-- `causa_probable`
-- `sugerencia`(que puede contener la linea de codigo corregida)
-
-Ejemplo conceptual:
-
-```text
-Variable o funcion 'y' no declarada
-Explicacion: El compilador encontro el nombre 'y' en tu codigo pero no sabe que es.
-Causa probable: Olvidaste declararla o escribiste mal su nombre.
-Sugerencia: Declara 'y' antes de usarla o revisa si falta un #include.
-```
-
-### `src/token.py`
-
-Define los tipos de token:
-
-- `ARCHIVO`
-- `LINEA`
-- `COLUMNA`
-- `SEVERIDAD`
-- `MENSAJE_CRUDO`
-- `TIPO_ERROR`
-- `SIMBOLO`
-- `DESCONOCIDO`
-
-## Uso
-
-Requisitos:
+## Requisitos
 
 - Python 3.10 o superior.
-- GCC instalado y disponible en el `PATH`.
-- `pytest` para ejecutar pruebas.
+- GCC instalado y disponible en `PATH`.
+- Navegador moderno para la interfaz web.
 
-Modo estudiante:
+Dependencias de ejecucion:
 
-```bash
-python main.py examples/error_lexico.c
+- `pycparser`
+- `Flask`
+
+Dependencia de desarrollo:
+
+- `pytest`
+
+Comprobar herramientas:
+
+```powershell
+python --version
+gcc --version
 ```
 
-Salida esperada:
+## Instalacion
+
+Desde PowerShell, dentro de la carpeta del proyecto:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Para ejecutar tambien las pruebas:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+```
+
+Si PowerShell bloquea la activacion del entorno, se puede usar directamente:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+## Ejecucion web
+
+Iniciar Flask:
+
+```powershell
+python web_app.py
+```
+
+Abrir:
 
 ```text
-=== MENSAJES MEJORADOS ===
-[1] [ERROR] Variable o funcion 'y' no declarada
-    Ubicacion: examples\error_lexico.c:4:20
-    Codigo:
-      4 |     printf("%d\n", y);
-        |                    ^
-    Explicacion: ...
-    Causa probable: ...
-    Sugerencia: ...
+http://127.0.0.1:5000
 ```
 
-Modo debug:
+Para detener el servidor:
 
-```bash
-python main.py examples/error_lexico.c --debug
+```text
+Ctrl + C
 ```
 
-El modo debug muestra:
+El servidor incluido es para desarrollo local. No se recomienda publicarlo en
+Internet sin autenticacion, aislamiento adicional y un servidor WSGI de
+produccion.
+
+## Ejecucion por terminal
+
+### Modo estudiante
+
+```powershell
+python main.py examples\variable_no_declarada.c
+```
+
+Muestra solamente los mensajes mejorados y el resumen.
+
+### Modo debug
+
+```powershell
+python main.py examples\variable_no_declarada.c --debug
+```
+
+Agrega:
 
 - `stderr` crudo de GCC
-- tokens generados por el lexer
+- tokens del lexer
+- AST del codigo C
+- tabla de simbolos
 - diagnosticos del parser
-- diagnosticos generados por el analizador semantico propio
-- arbol sintactico de diagnosticos
-- mensajes mejorados
+- diagnosticos semanticos propios
+- arboles de diagnosticos
 
-Exportar resultados a JSON:
+### Exportar JSON
 
-```bash
-python main.py examples/error_lexico.c --json outputs/diagnosticos.json
+```powershell
+python main.py examples\variable_no_declarada.c --json outputs\diagnosticos.json
 ```
 
-La ruta padre se crea automaticamente si no existe. El JSON contiene:
+### Combinar debug y JSON
 
-- archivo fuente
-- resumen de clasificacion
-- archivo, linea y columna de cada diagnostico
-- severidad y etiqueta visible
-- origen del diagnostico: `gcc` o `semantico`
-- tipo de error y simbolo
-- mensaje original de GCC
-- titulo, explicacion, causa probable y sugerencia
-- contexto de codigo
-- notas asociadas de GCC
-- arbol sintactico del diagnostico
-
-El modo debug y la exportacion pueden combinarse:
-
-```bash
-python main.py examples/error_lexico.c --debug --json outputs/diagnosticos.json
+```powershell
+python main.py examples\variable_no_declarada.c --debug --json outputs\diagnosticos.json
 ```
 
-Cuando no existen errores ni advertencias, el programa informa:
+### Codigo correcto
+
+```powershell
+python main.py examples\correcto.c
+```
+
+Salida principal:
 
 ```text
 Revision completada: no se detectaron errores ni advertencias.
 ```
 
-Cuando existen diagnosticos, tambien muestra:
+## Formato de salida mejorada
+
+Ejemplo conceptual:
 
 ```text
-=== RESUMEN DE CLASIFICACION ===
-Diagnosticos principales: 4
-Clasificados: 4
-Desconocidos: 0
-Cobertura de clasificacion: 100.0%
+[ERROR] Variable o funcion 'total' no declarada
+Ubicacion: examples\variable_no_declarada.c:4:20
+
+Codigo:
+  4 |     printf("%d\n", total);
+    |                    ^
+
+Explicacion: el identificador no tiene una declaracion visible.
+Causa probable: se olvido declarar la variable o se escribio otro nombre.
+Sugerencia: declarar 'total' antes de utilizarla.
 ```
 
-## Ejemplos Incluidos
+## Exportacion JSON
 
-Archivo correcto:
+El reporte JSON contiene:
 
-- `examples/correcto.c`
+- archivo fuente normalizado con `/`
+- resumen de clasificacion
+- diagnosticos principales
+- severidad y etiqueta visible
+- categoria y simbolo
+- origen GCC o semantico
+- mensaje tecnico original
+- explicacion, causa y sugerencia
+- contexto de codigo
+- notas de GCC
+- arbol de cada diagnostico
+- AST completo del codigo C
+- error de construccion del AST, si existe
+- tabla de simbolos jerarquica
+- usos no resueltos y redeclaraciones
 
-Archivo con varios errores combinados:
+Estructura resumida:
 
-- `examples/error_lexico.c`
+```json
+{
+  "archivo_fuente": "examples/programa.c",
+  "resumen": {
+    "diagnosticos_principales": 1,
+    "clasificados": 1,
+    "desconocidos": 0,
+    "cobertura_clasificacion": 100.0
+  },
+  "diagnosticos": [],
+  "ast_codigo": {},
+  "error_ast": null,
+  "tabla_simbolos": {}
+}
+```
 
-Archivos por tipo de error:
+## Ejemplos incluidos
 
-- `examples/variable_no_declarada.c`
-- `examples/falta_punto_y_coma.c`
-- `examples/tipo_incompatible.c`
-- `examples/funcion_implicita.c`
-- `examples/argumentos_incorrectos.c`
-- `examples/variable_no_usada.c`
-- `examples/redeclaracion.c`
-- `examples/division_por_cero.c`
-- `examples/retorno_incorrecto.c`
-- `examples/error_puntero.c`
-- `examples/formato_printf.c`
-- `examples/delimitador_desbalanceado.c`
-- `examples/falta_retorno.c`
-- `examples/conversion_peligrosa.c`
-- `examples/variable_no_inicializada.c`
-- `examples/acceso_estructura.c`
-- `examples/error_preprocesador.c`
-- `examples/extension_mayuscula.C`
+### Flujo general
 
-Archivos especificos para demostrar el analisis semantico propio:
+| Archivo | Objetivo |
+| --- | --- |
+| `correcto.c` | Programa sin diagnosticos |
+| `error_lexico.c` | Varios errores combinados |
+| `extension_mayuscula.C` | Compatibilidad con extension `.C` |
 
-- `examples/semantico_variable_no_usada.c`
-- `examples/semantico_falta_retorno.c`
-- `examples/semantico_correcto.c`
-- `examples/semantico_division_cero.c`
-- `examples/semantico_falta_stdio.c`
-- `examples/semantico_asignacion.c`
+### Categorias GCC
 
-Los ejemplos de categorias ampliadas fueron compilados con GCC 13.2.0 para comprobar los mensajes reales emitidos y ajustar la clasificacion. `extension_mayuscula.C` comprueba que `.C` se acepte y se fuerce como lenguaje C, no C++.
+| Archivo | Caso principal |
+| --- | --- |
+| `variable_no_declarada.c` | Identificador no declarado |
+| `falta_punto_y_coma.c` | Token esperado |
+| `tipo_incompatible.c` | Tipos incompatibles |
+| `funcion_implicita.c` | Funcion no declarada |
+| `argumentos_incorrectos.c` | Cantidad de argumentos |
+| `variable_no_usada.c` | Variable no utilizada |
+| `redeclaracion.c` | Redeclaracion |
+| `division_por_cero.c` | Division por cero |
+| `retorno_incorrecto.c` | Retorno incorrecto |
+| `error_puntero.c` | Error de puntero |
+| `formato_printf.c` | Formato de `printf` |
+| `delimitador_desbalanceado.c` | Delimitador faltante |
+| `falta_retorno.c` | Funcion sin retorno |
+| `conversion_peligrosa.c` | Conversion peligrosa |
+| `variable_no_inicializada.c` | Variable no inicializada |
+| `acceso_estructura.c` | Acceso a estructura |
+| `error_preprocesador.c` | Error de preprocesador |
+
+### Analisis semantico propio
+
+| Archivo | Regla demostrada |
+| --- | --- |
+| `semantico_correcto.c` | Programa aceptado por reglas propias |
+| `semantico_variable_no_usada.c` | Variable local no utilizada |
+| `semantico_falta_retorno.c` | Camino sin retorno |
+| `semantico_division_cero.c` | Expresion constante igual a cero |
+| `semantico_falta_stdio.c` | Funcion de E/S sin `<stdio.h>` |
+| `semantico_asignacion.c` | Asignacion dentro de condicion |
+| `semantico_void_main.c` | Declaracion `void main` |
+
+Ejecutar cualquier ejemplo:
+
+```powershell
+python main.py examples\formato_printf.c
+```
 
 ## Pruebas
 
-Ejecutar con el entorno virtual:
+Ejecutar toda la suite:
 
-```bash
-.venv\Scripts\python.exe -m pytest -q
-```
-
-O con Python global si tiene `pytest` instalado:
-
-```bash
+```powershell
 python -m pytest -q
 ```
 
-Cobertura actual de pruebas:
-
-- lexer sobre archivos correctos y con errores
-- captura automatica de `stderr`
-- tokenizacion de lineas reales de GCC
-- clasificacion de errores frecuentes
-- extraccion de simbolos
-- parser sobre diagnosticos validos e invalidos
-- arbol sintactico de diagnosticos
-- analizador semantico propio
-- explainer para todos los tipos soportados
-- agrupacion de `note` como informacion secundaria
-- modo estudiante y modo debug
-- contexto de codigo fuente
-- ejemplos individuales por tipo de error
-- manejo de errores externos y timeout
-- salida especifica para codigo correcto
-- resumen y cobertura de clasificacion
-- categorias ampliadas con mensajes simulados y archivos C reales
-- normalizacion de `fatal error`
-
-## Relacion Con Los Papers Base
-
-El proyecto se alinea con la idea de mejorar mensajes de error de compilador para principiantes:
-
-- El paper *Compiler Error Messages Considered Unhelpful* justifica que los mensajes de compiladores suelen ser dificiles de entender, especialmente para novatos.
-- El paper *An Effective Approach to Enhancing Compiler Error Messages* muestra una estrategia similar a Decaf: tomar mensajes crudos del compilador y presentar mensajes mejorados junto con explicaciones mas utiles.
-
-Este proyecto aplica esa idea a GCC y C:
+Ultima verificacion del estado documentado:
 
 ```text
-mensaje crudo de GCC -> diagnostico estructurado -> explicacion pedagogica
+220 passed
 ```
 
-## Pendientes
+La cobertura funcional incluye:
 
-- Completar la aplicación de sugerencias dinámicas (linea_codigo) a las funciones de error restantes en explainer.py.
-- Ampliar patrones a medida que aparezcan nuevos mensajes de GCC.
-- Mejorar la extraccion de simbolos para las categorias nuevas.
-- Evaluar el sistema con estudiantes o casos reales de laboratorio.
-- Agregar una interfaz grafica o web si el proyecto crece.
+- ejecucion real de GCC
+- clasificacion y extraccion de simbolos
+- compatibilidad de rutas Windows y extension `.C`
+- agrupacion de notas
+- parser y arboles de diagnosticos
+- AST del codigo C
+- limpieza de comentarios y directivas
+- tabla de simbolos y resolucion por ambitos
+- sombreado y redeclaraciones
+- usos no resueltos
+- reglas semanticas AST y respaldo textual
+- deduplicacion GCC/semantico
+- explicaciones para todas las categorias
+- contexto del codigo fuente
+- modo estudiante, debug y JSON
+- manejo de errores externos
+- API estructurada `analizar_archivo()`
+- rutas web, codigo pegado y carga de archivos
+- validaciones de la interfaz Flask
 
-## Resumen
+## Relacion con las etapas de un compilador
 
-El proyecto ya cuenta con un pipeline funcional para transformar mensajes de GCC en diagnosticos estructurados y explicaciones mas comprensibles. La contribucion principal actual no es compilar un lenguaje propio, sino mejorar la retroalimentacion que recibe un estudiante cuando comete errores en programas C.
+El proyecto contiene componentes equivalentes a varias etapas, aunque su
+objetivo no sea generar codigo ejecutable:
+
+| Etapa | Implementacion en el proyecto |
+| --- | --- |
+| Analisis lexico | Tokenizacion de `stderr` de GCC en `src/lexer.py` |
+| Analisis sintactico de diagnosticos | `DiagnosticEntry` y arbol de diagnostico en `src/parser.py` |
+| Analisis sintactico de C | AST mediante `pycparser` en `src/ast_builder.py` |
+| Tabla de simbolos | Ambitos y resolucion en `src/symbol_table.py` |
+| Analisis semantico | Reglas AST en `src/semantic_ast.py` |
+| Presentacion de errores | Explicaciones en `src/explainer.py` |
+
+No implementa generacion de codigo, optimizacion, enlazado ni ejecucion de
+programas. Es correcto describirlo como un analizador estatico educativo para
+C apoyado en GCC.
+
+## Relacion con los papers base
+
+El proyecto sigue la idea central de *Compiler Error Messages Considered
+Unhelpful*: los mensajes tecnicos suelen ser dificiles de interpretar para
+personas que estan aprendiendo.
+
+Tambien aplica un enfoque relacionado con *An Effective Approach to Enhancing
+Compiler Error Messages*: tomar el diagnostico existente, reconocer su
+estructura y presentar una version mas util.
+
+La adaptacion realizada en este proyecto es:
+
+```text
+diagnostico GCC
+  -> clasificacion
+  -> contexto estructural y semantico
+  -> explicacion pedagogica en espanol
+```
+
+## Limitaciones actuales
+
+- Solo analiza codigo C.
+- Requiere GCC instalado localmente.
+- La clasificacion depende de patrones de mensajes de GCC en ingles.
+- No implementa un sistema de tipos completo independiente de GCC.
+- No comprueba todavia todos los tipos de argumentos, asignaciones y retornos.
+- El analisis de flujo de control cubre casos basicos, no todos los caminos de
+  `switch`, ciclos, `goto` o construcciones complejas.
+- `pycparser` no ejecuta el preprocesador real; las directivas se reemplazan
+  para construir el AST.
+- Macros y tipos definidos exclusivamente en cabeceras pueden impedir un AST
+  completo o requerir soporte adicional.
+- El respaldo por expresiones regulares es menos preciso que el analisis AST.
+- La interfaz Flask incluida es un servidor de desarrollo local.
+- La interfaz web aun no descarga JSON directamente.
+- La lectura de errores por voz aun no esta implementada.
+- El sistema propone sugerencias, pero no modifica automaticamente el codigo.
+
+## Pendientes recomendados
+
+1. Agregar sintesis de voz con controles para escuchar, pausar y detener cada
+   diagnostico.
+2. Completar comprobacion propia de tipos en asignaciones e inicializaciones.
+3. Registrar firmas de funciones y validar cantidad y tipos de argumentos.
+4. Verificar compatibilidad del valor retornado con el tipo de la funcion.
+5. Ampliar analisis de flujo para variables posiblemente no inicializadas.
+6. Integrar un preprocesamiento controlado para macros y cabeceras complejas.
+7. Permitir descargar el reporte JSON desde la interfaz web.
+8. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
+   de correccion y cobertura de categorias.
+9. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
+   deja de ser exclusivamente local.

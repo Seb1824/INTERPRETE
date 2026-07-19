@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Analizador educativo de mensajes de GCC para codigo C">
+    <title>Analizador educativo de C</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body data-con-resultado="{{ 'true' if resultado else 'false' }}">
+    <a class="skip-link" href="#contenido-principal">Ir al contenido principal</a>
+
+    <header class="topbar">
+        <div class="brand" aria-label="Analizador educativo de C">
+            <span class="brand-mark" aria-hidden="true">C:</span>
+            <div>
+                <h1>Analizador educativo de C</h1>
+                <p>Diagnosticos claros a partir de GCC</p>
+            </div>
+        </div>
+        <div class="runtime" aria-label="Motor de analisis">Python + GCC</div>
+    </header>
+
+    <main id="contenido-principal" class="workspace">
+        <section class="editor-pane" aria-labelledby="editor-title">
+            <div class="pane-header">
+                <div>
+                    <p class="section-label">ENTRADA</p>
+                    <h2 id="editor-title">Codigo fuente</h2>
+                </div>
+                <span id="character-count" class="character-count" aria-live="polite"></span>
+            </div>
+
+            <form id="analysis-form" action="{{ url_for('analizar') }}" method="post" enctype="multipart/form-data">
+                <div class="file-row">
+                    <label for="archivo">Archivo C</label>
+                    <input id="archivo" name="archivo" type="file" accept=".c,.C,text/x-c">
+                </div>
+
+                <label class="sr-only" for="codigo">Codigo C para analizar</label>
+                <textarea
+                    id="codigo"
+                    name="codigo"
+                    spellcheck="false"
+                    autocapitalize="off"
+                    autocomplete="off"
+                    aria-describedby="editor-status"
+                >{{ codigo }}</textarea>
+
+                <div class="editor-actions">
+                    <span id="editor-status" class="file-name">{{ nombre_archivo }}</span>
+                    <button id="analyze-button" type="submit">Analizar codigo</button>
+                </div>
+            </form>
+        </section>
+
+        <section id="resultados" class="results-pane" aria-labelledby="results-title">
+            <div class="pane-header results-header">
+                <div>
+                    <p class="section-label">SALIDA</p>
+                    <h2 id="results-title">Resultados</h2>
+                </div>
+                {% if resultado %}
+                    <span class="analysis-file" title="Archivo analizado">{{ resultado.archivo }}</span>
+                {% endif %}
+            </div>
+
+            {% if error %}
+                <div class="system-message error-message" role="alert">
+                    <strong>No se pudo completar el analisis</strong>
+                    <p>{{ error }}</p>
+                </div>
+            {% elif resultado %}
+                <div class="summary" role="status" aria-live="polite" aria-atomic="true">
+                    <div>
+                        <span class="summary-number error-number">{{ resultado.errores }}</span>
+                        <span>Errores</span>
+                    </div>
+                    <div>
+                        <span class="summary-number warning-number">{{ resultado.advertencias }}</span>
+                        <span>Advertencias</span>
+                    </div>
+                    <div>
+                        <span class="summary-number">{{ '%.1f'|format(resultado.cobertura) }}%</span>
+                        <span>Cobertura</span>
+                    </div>
+                </div>
+
+                {% if resultado.diagnosticos %}
+                    <div class="diagnostic-list" aria-label="Diagnosticos encontrados">
+                        {% for diagnostico in resultado.diagnosticos %}
+                            <article class="diagnostic diagnostic-{{ diagnostico.severidad }}">
+                                <header class="diagnostic-header">
+                                    <span class="severity severity-{{ diagnostico.severidad }}">{{ diagnostico.etiqueta }}</span>
+                                    <div>
+                                        <h3>{{ diagnostico.titulo }}</h3>
+                                        <p class="location">
+                                            {{ diagnostico.archivo }} · linea {{ diagnostico.linea }}, columna {{ diagnostico.columna }}
+                                        </p>
+                                    </div>
+                                </header>
+
+                                {% if diagnostico.linea_codigo %}
+                                    <div class="code-context" aria-label="Contexto del codigo fuente">
+                                        <pre><code><span class="line-number">{{ diagnostico.linea }}</span> | {{ diagnostico.linea_codigo }}
+<span class="line-number"> </span> | {{ diagnostico.marcador }}</code></pre>
+                                    </div>
+                                {% endif %}
+
+                                <dl class="explanation-list">
+                                    <div>
+                                        <dt>Que significa</dt>
+                                        <dd>{{ diagnostico.explicacion }}</dd>
+                                    </div>
+                                    <div>
+                                        <dt>Causa probable</dt>
+                                        <dd>{{ diagnostico.causa_probable }}</dd>
+                                    </div>
+                                    <div class="suggestion">
+                                        <dt>Sugerencia</dt>
+                                        <dd>{{ diagnostico.sugerencia }}</dd>
+                                    </div>
+                                </dl>
+
+                                {% if diagnostico.notas %}
+                                    <details class="gcc-notes">
+                                        <summary>Notas relacionadas de GCC</summary>
+                                        <ul>
+                                            {% for nota in diagnostico.notas %}
+                                                <li>{{ nota }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </details>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="system-message success-message" role="status">
+                        <strong>Revision completada</strong>
+                        <p>No se detectaron errores ni advertencias.</p>
+                    </div>
+                {% endif %}
+
+                <details class="technical-details">
+                    <summary>Detalles tecnicos</summary>
+                    <div class="technical-grid">
+                        <section aria-labelledby="symbols-title">
+                            <h3 id="symbols-title">Tabla de simbolos</h3>
+                            {% if resultado.tabla_simbolos %}
+                                <pre>{{ resultado.tabla_simbolos | join('\n') }}</pre>
+                            {% else %}
+                                <p>No disponible.</p>
+                            {% endif %}
+                        </section>
+                        <section aria-labelledby="ast-title">
+                            <h3 id="ast-title">AST del codigo</h3>
+                            {% if resultado.ast %}
+                                <pre>{{ resultado.ast | join('\n') }}</pre>
+                            {% elif resultado.error_ast %}
+                                <p>{{ resultado.error_ast }}</p>
+                            {% else %}
+                                <p>No disponible.</p>
+                            {% endif %}
+                        </section>
+                    </div>
+                </details>
+            {% else %}
+                <div class="empty-results" aria-hidden="true">
+                    <span class="empty-code">{ }</span>
+                    <p>Sin analisis</p>
+                </div>
+            {% endif %}
+        </section>
+    </main>
+</body>
+</html>

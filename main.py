@@ -2,10 +2,11 @@ import argparse
 import json
 from pathlib import Path
 
+from src.analyzer import analizar_archivo
+from src.analyzer import combinar_diagnosticos as _combinar_diagnosticos
 from src.explainer import explain
 from src.lexer import Lexer, LexerError
-from src.parser import Parser, construir_arbol_diagnostico
-from src.semantic import SemanticAnalyzer
+from src.parser import construir_arbol_diagnostico
 
 
 def _agrupar_diagnosticos_con_notas(diagnosticos):
@@ -45,51 +46,6 @@ def _calcular_resumen_clasificacion(diagnosticos):
         "cobertura": cobertura,
         "diagnosticos_desconocidos": desconocidos,
     }
-
-
-def _combinar_diagnosticos(diagnosticos_gcc, diagnosticos_semanticos):
-    """Filtra redundancias internas de GCC y agrega diagnosticos semanticos."""
-    
-    gcc_dict = {}
-    for diag in diagnosticos_gcc:
-        clave = (diag.linea, diag.columna, diag.simbolo, diag.tipo_error)
-        
-        if clave not in gcc_dict:
-            gcc_dict[clave] = diag
-        else:
-            existente = gcc_dict[clave]
-            if diag.severidad == "error" and existente.severidad == "warning":
-                gcc_dict[clave] = diag
-                
-    gcc_limpios = list(gcc_dict.values())
-
-    combinados = list(gcc_limpios)
-
-    for semantico in diagnosticos_semanticos:
-        duplicado = any(
-            existente.tipo_error == semantico.tipo_error
-            and existente.archivo == semantico.archivo
-            and (
-                (
-                    existente.linea == semantico.linea
-                    and (
-                        not existente.simbolo
-                        or not semantico.simbolo
-                        or existente.simbolo == semantico.simbolo
-                    )
-                )
-                or (
-                    semantico.tipo_error in {"missing_return", "return_error"}
-                    and semantico.simbolo
-                    and existente.simbolo == semantico.simbolo
-                )
-            )
-            for existente in gcc_limpios
-        )
-        if not duplicado:
-            combinados.append(semantico)
-
-    return combinados
 
 
 def _obtener_contexto_codigo(diagnostico):
@@ -364,23 +320,18 @@ def run_pipeline(
         return 1
 
     try:
-        lexer = Lexer(str(ruta))
-        stderr = lexer.compilar_y_capturar()
-        tokens = lexer.tokenizar()
+        resultado = analizar_archivo(str(ruta))
     except LexerError as exc:
         print(f"[ERROR] {exc}")
         return 1
 
-    diagnosticos_gcc = Parser(tokens).parse()
-    analizador_semantico = SemanticAnalyzer(str(ruta))
-    diagnosticos_semanticos = analizador_semantico.analizar()
-    ast_codigo = analizador_semantico.ast_codigo
-    error_ast = analizador_semantico.error_ast
-    tabla_simbolos = analizador_semantico.tabla_simbolos
-    diagnosticos = _combinar_diagnosticos(
-        diagnosticos_gcc,
-        diagnosticos_semanticos,
-    )
+    stderr = resultado.stderr
+    tokens = resultado.tokens
+    diagnosticos_semanticos = resultado.diagnosticos_semanticos
+    ast_codigo = resultado.ast_codigo
+    error_ast = resultado.error_ast
+    tabla_simbolos = resultado.tabla_simbolos
+    diagnosticos = resultado.diagnosticos
 
     if json_output:
         try:
