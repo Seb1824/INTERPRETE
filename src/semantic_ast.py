@@ -58,6 +58,7 @@ class ASTSemanticAnalyzer:
         diagnosticos.extend(self._analizar_division_cero())
         diagnosticos.extend(self._analizar_asignaciones_en_condiciones())
         diagnosticos.extend(self._analizar_simbolos_no_usados())
+        diagnosticos.extend(self._analizar_tipos_asignacion())
 
         for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
@@ -238,6 +239,104 @@ class ASTSemanticAnalyzer:
             )
 
         return diagnosticos
+    
+    def _analizar_tipos_asignacion(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+        reportados: set[tuple] = set()
+
+        for decl in _buscar_nodos(self.ast_codigo, "Decl"):
+            nombre = decl.atributos.get("name")
+            if not nombre:
+                continue
+
+            init = _hijo_por_rol(decl, "init")
+            if init is None:
+                continue
+
+            tipo_decl = _hijo_por_rol(decl, "type")
+            tipo_izquierdo = _describir_tipo_nodo(tipo_decl)
+            tipo_derecho = _inferir_tipo_expresion(init, self.tabla_simbolos)
+
+            if tipo_izquierdo is None or tipo_derecho is None:
+                continue
+            if _tipos_compatibles(tipo_izquierdo, tipo_derecho):
+                continue
+
+            clave = (decl.linea, decl.columna, nombre)
+            if clave in reportados:
+                continue
+            reportados.add(clave)
+
+            diagnosticos.append(
+                self._crear_diagnostico(
+                    nodo=decl,
+                    severidad="warning",
+                    mensaje=(
+                        f"analizador semantico AST: inicializacion de "
+                        f"'{nombre}' ({tipo_izquierdo}) con un valor de "
+                        f"tipo incompatible ({tipo_derecho})"
+                    ),
+                    tipo_error="type_mismatch",
+                    simbolo=nombre,
+                )
+            )
+
+        for asignacion in _buscar_nodos(self.ast_codigo, "Assignment"):
+            if asignacion.atributos.get("op") != "=":
+                continue
+
+            lvalue = _hijo_por_rol(asignacion, "lvalue")
+            rvalue = _hijo_por_rol(asignacion, "rvalue")
+            if lvalue is None or rvalue is None:
+                continue
+
+            nombre = lvalue.atributos.get("name") if lvalue.tipo == "ID" else None
+            if not nombre:
+                continue
+
+            simbolo = self.tabla_simbolos.resolver(
+                nombre,
+                self._ambito_en_linea(asignacion.linea or 1),
+            )
+            if simbolo is None:
+                continue
+
+            tipo_izquierdo = simbolo.tipo_dato
+            tipo_derecho = _inferir_tipo_expresion(rvalue, self.tabla_simbolos)
+
+            if tipo_derecho is None:
+                continue
+            if _tipos_compatibles(tipo_izquierdo, tipo_derecho):
+                continue
+
+            clave = (asignacion.linea, asignacion.columna, nombre)
+            if clave in reportados:
+                continue
+            reportados.add(clave)
+
+            diagnosticos.append(
+                self._crear_diagnostico(
+                    nodo=asignacion,
+                    severidad="warning",
+                    mensaje=(
+                        f"analizador semantico AST: asignacion a "
+                        f"'{nombre}' ({tipo_izquierdo}) de un valor de "
+                        f"tipo incompatible ({tipo_derecho})"
+                    ),
+                    tipo_error="type_mismatch",
+                    simbolo=nombre,
+                )
+            )
+
+        return diagnosticos
+
+    def _ambito_en_linea(self, linea: int):
+        mejor = self.tabla_simbolos.ambito_global
+        for ambito in self.tabla_simbolos.todos_los_ambitos():
+            if ambito.linea_inicio <= linea:
+                if ambito.linea_inicio > mejor.linea_inicio:
+                    mejor = ambito
+        return mejor
 
     def _crear_diagnostico_simbolo(
         self,
@@ -482,3 +581,112 @@ def _buscar_columna_operador(
             return posicion + 1
 
     return nodo.columna or 1
+
+def _describir_tipo_nodo(nodo: SourceASTNode | None) -> str | None:
+    """Extrae el tipo como string desde un nodo de tipo del AST."""
+    if nodo is None:
+        return None
+
+    if nodo.tipo == "IdentifierType":
+        return nodo.atributos.get("names")
+
+    if nodo.tipo == "PtrDecl":
+        interno = _hijo_por_rol(nodo, "type")
+        base = _describir_tipo_nodo(interno)
+        return f"{base} *" if base else None
+
+    if nodo.tipo == "ArrayDecl":
+        interno = _hijo_por_rol(nodo, "type")
+        base = _describir_tipo_nodo(interno)
+        return f"{base}[]" if base else None
+
+    interno = _hijo_por_rol(nodo, "type")
+    return _describir_tipo_nodo(interno)
+
+
+def _inferir_tipo_expresion(
+    nodo: SourceASTNode,
+    tabla: "SymbolTable",
+) -> str | None:
+    """Infiere el tipo de una expresion desde el AST."""
+    if nodo.tipo == "Constant":
+        tipo = nodo.atributos.get("type", "")
+        valor = nodo.atributos.get("value", "")
+        if tipo == "string":
+            return "char *"
+        if "." in valor or "e" in valor.lower():
+            return "double"
+        if valor.endswith(("f", "F")):
+            return "float"
+        return "int"
+
+    if nodo.tipo == "ID":
+        nombre = nodo.atributos.get("name")
+        if not nombre:
+            return None
+        for ambito in tabla.todos_los_ambitos():
+            simbolo = ambito.buscar_local(nombre)
+            if simbolo is not None:
+                return simbolo.tipo_dato
+        return None
+
+    if nodo.tipo == "Cast":
+        tipo_cast = _hijo_por_rol(nodo, "to_type")
+        return _describir_tipo_nodo(tipo_cast)
+
+    if nodo.tipo == "UnaryOp":
+        op = nodo.atributos.get("op", "")
+        if op == "&":
+            expr = _hijo_por_rol(nodo, "expr")
+            base = _inferir_tipo_expresion(expr, tabla) if expr else None
+            return f"{base} *" if base else None
+        if op == "*":
+            expr = _hijo_por_rol(nodo, "expr")
+            base = _inferir_tipo_expresion(expr, tabla) if expr else None
+            return base.replace(" *", "", 1) if base and " *" in base else None
+
+    return None
+
+
+def _tipos_compatibles(tipo_izq: str, tipo_der: str) -> bool:
+    """
+    Devuelve True si la asignacion es aceptable sin diagnostico.
+    Solo reporta incompatibilidades claras y evita falsos positivos.
+    """
+    if tipo_izq == tipo_der:
+        return True
+
+    izq = tipo_izq.strip().lower()
+    der = tipo_der.strip().lower()
+
+    if izq == der:
+        return True
+
+    enteros = {"int", "short", "long", "unsigned", "char",
+               "unsigned int", "unsigned long", "unsigned short",
+               "unsigned char", "long long", "signed"}
+    if izq in enteros and der in enteros:
+        return True
+
+    flotantes = {"float", "double", "long double"}
+    if izq in flotantes and der in flotantes:
+        return True
+
+    if izq in enteros and der in flotantes:
+        return True
+    if izq in flotantes and der in enteros:
+        return True
+
+    if "null" in der or der == "0":
+        return True
+
+    if izq == "char *" and der == "char *":
+        return True
+
+    if izq in enteros and der == "char *":
+        return False
+
+    if "*" in izq and der in enteros:
+        return False
+
+    return True
