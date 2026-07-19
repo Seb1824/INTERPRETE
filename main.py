@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
+from src.ast_builder import ASTBuildError, construir_ast_codigo
 from src.explainer import explain
 from src.lexer import Lexer, LexerError
 from src.parser import Parser, construir_arbol_diagnostico
@@ -127,7 +128,12 @@ def _normalizar_ruta_json(ruta: str) -> str:
     return ruta.replace("\\", "/")
 
 
-def _construir_reporte_json(ruta_fuente: str, diagnosticos) -> dict:
+def _construir_reporte_json(
+    ruta_fuente: str,
+    diagnosticos,
+    ast_codigo=None,
+    error_ast: str | None = None,
+) -> dict:
     resumen = _calcular_resumen_clasificacion(diagnosticos)
     elementos = []
 
@@ -169,13 +175,26 @@ def _construir_reporte_json(ruta_fuente: str, diagnosticos) -> dict:
             "cobertura_clasificacion": round(resumen["cobertura"], 1),
         },
         "diagnosticos": elementos,
+        "ast_codigo": ast_codigo.to_dict() if ast_codigo else None,
+        "error_ast": error_ast,
     }
 
 
-def _exportar_json(ruta_salida: str, ruta_fuente: str, diagnosticos) -> None:
+def _exportar_json(
+    ruta_salida: str,
+    ruta_fuente: str,
+    diagnosticos,
+    ast_codigo=None,
+    error_ast: str | None = None,
+) -> None:
     destino = Path(ruta_salida)
     destino.parent.mkdir(parents=True, exist_ok=True)
-    reporte = _construir_reporte_json(ruta_fuente, diagnosticos)
+    reporte = _construir_reporte_json(
+        ruta_fuente,
+        diagnosticos,
+        ast_codigo=ast_codigo,
+        error_ast=error_ast,
+    )
     destino.write_text(
         json.dumps(reporte, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -187,6 +206,8 @@ def _imprimir_salida_debug(
     tokens,
     diagnosticos,
     diagnosticos_semanticos=None,
+    ast_codigo=None,
+    error_ast: str | None = None,
 ) -> None:
     print("=== STDERR CRUDO (GCC) ===")
     print(stderr.strip() or "(sin salida)")
@@ -197,6 +218,15 @@ def _imprimir_salida_debug(
     else:
         for t in tokens:
             print(t)
+
+    print("\n=== AST DEL CODIGO C ===")
+    if ast_codigo:
+        for linea in ast_codigo.render():
+            print(linea)
+    elif error_ast:
+        print(f"(no disponible: {error_ast})")
+    else:
+        print("(sin AST)")
 
     print("\n=== DIAGNOSTICOS (PARSER) ===")
     if not diagnosticos:
@@ -311,6 +341,14 @@ def run_pipeline(
         print(f"[ERROR] {error_validacion}")
         return 1
 
+    ast_codigo = None
+    error_ast = None
+    if debug or json_output:
+        try:
+            ast_codigo = construir_ast_codigo(str(ruta))
+        except ASTBuildError as exc:
+            error_ast = str(exc)
+
     try:
         lexer = Lexer(str(ruta))
         stderr = lexer.compilar_y_capturar()
@@ -328,7 +366,13 @@ def run_pipeline(
 
     if json_output:
         try:
-            _exportar_json(json_output, str(ruta), diagnosticos)
+            _exportar_json(
+                json_output,
+                str(ruta),
+                diagnosticos,
+                ast_codigo=ast_codigo,
+                error_ast=error_ast,
+            )
         except OSError as exc:
             print(f"[ERROR] No se pudo guardar el archivo JSON '{json_output}': {exc}")
             return 1
@@ -339,6 +383,8 @@ def run_pipeline(
             tokens,
             diagnosticos,
             diagnosticos_semanticos=diagnosticos_semanticos,
+            ast_codigo=ast_codigo,
+            error_ast=error_ast,
         )
         print()
 

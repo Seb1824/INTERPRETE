@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from src.lexer import CompilerNotFoundError
 from main import _agrupar_diagnosticos_con_notas
 from main import _calcular_resumen_clasificacion
@@ -84,6 +86,7 @@ def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):
     assert exit_code == 0
     assert "=== STDERR CRUDO (GCC) ===" in salida
     assert "=== TOKENS ===" in salida
+    assert "=== AST DEL CODIGO C ===" in salida
     assert "=== DIAGNOSTICOS (PARSER) ===" in salida
     assert "=== ANALISIS SEMANTICO PROPIO ===" in salida
     assert "=== ARBOL SINTACTICO DE DIAGNOSTICOS ===" in salida
@@ -228,4 +231,145 @@ def test_run_pipeline_exporta_json_vacio_para_codigo_correcto(tmp_path):
     assert reporte["resumen"]["diagnosticos_principales"] == 0
     assert reporte["resumen"]["cobertura_clasificacion"] == 100.0
     assert reporte["diagnosticos"] == []
+    assert reporte["ast_codigo"]["tipo"] == "FileAST"
+    assert reporte["ast_codigo"]["hijos"]
+    assert reporte["error_ast"] is None
+
+
+def test_run_pipeline_json_con_codigo_invalido_conserva_diagnosticos(tmp_path):
+    ruta_json = tmp_path / "codigo_invalido.json"
+
+    exit_code = run_pipeline(
+        "examples/error_lexico.c",
+        json_output=str(ruta_json),
+    )
+    reporte = json.loads(ruta_json.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert reporte["diagnosticos"]
+    assert reporte["ast_codigo"] is None
+    assert reporte["error_ast"]
+
+
+@pytest.mark.parametrize(
+    ("archivo", "tipo_esperado", "simbolo_esperado"),
+    [
+        (
+            "semantico_variable_no_usada.c",
+            "unused_variable",
+            "temporal",
+        ),
+        (
+            "semantico_falta_retorno.c",
+            "missing_return",
+            "calcular",
+        ),
+        (
+            "semantico_asignacion.c",
+            "assignment_in_condition",
+            "=",
+        ),
+        (
+            "semantico_division_cero.c",
+            "division_by_zero",
+            "/",
+        ),
+        (
+            "semantico_falta_stdio.c",
+            "implicit_declaration",
+            "printf",
+        ),
+        (
+            "semantico_void_main.c",
+            "return_error",
+            "main",
+        ),
+    ],
+)
+def test_pipeline_integra_regla_semantica_en_json_y_arbol(
+    archivo,
+    tipo_esperado,
+    simbolo_esperado,
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    def gcc_sin_diagnosticos(self):
+        self.stderr_crudo = ""
+        self.compilado = True
+        return ""
+
+    monkeypatch.setattr("main.Lexer.compilar_y_capturar", gcc_sin_diagnosticos)
+    monkeypatch.setattr("main.Lexer.tokenizar", lambda self: [])
+
+    ruta_fuente = f"examples/{archivo}"
+    ruta_json = tmp_path / f"{tipo_esperado}.json"
+
+    exit_code = run_pipeline(
+        ruta_fuente,
+        json_output=str(ruta_json),
+    )
+    salida = capsys.readouterr().out
+    reporte = json.loads(ruta_json.read_text(encoding="utf-8"))
+    diagnostico = next(
+        elemento
+        for elemento in reporte["diagnosticos"]
+        if elemento["tipo_error"] == tipo_esperado
+    )
+
+    assert exit_code == 0
+    assert diagnostico["origen"] == "semantico"
+    assert diagnostico["simbolo"] == simbolo_esperado
+    assert diagnostico["titulo"]
+    assert diagnostico["explicacion"]
+    assert diagnostico["sugerencia"]
+    assert diagnostico["contexto_codigo"]
+    assert "Origen: analizador semantico del proyecto" in salida
+
+    arbol = diagnostico["arbol_sintactico"]
+    nodos_raiz = {
+        hijo["nombre"]: hijo["valor"]
+        for hijo in arbol["hijos"]
+    }
+    assert arbol["nombre"] == "Diagnostico"
+    assert nodos_raiz["TipoError"] == tipo_esperado
+    assert nodos_raiz["Origen"] == "semantico"
+    assert nodos_raiz["Simbolo"] == simbolo_esperado
+    assert any(
+        hijo["nombre"] == "ContextoFuente"
+        for hijo in arbol["hijos"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("archivo", "tipo_esperado"),
+    [
+        ("semantico_asignacion.c", "assignment_in_condition"),
+        ("semantico_division_cero.c", "division_by_zero"),
+        ("semantico_falta_stdio.c", "implicit_declaration"),
+        ("semantico_void_main.c", "return_error"),
+    ],
+)
+def test_pipeline_combina_gcc_y_semantico_sin_duplicar_categoria(
+    archivo,
+    tipo_esperado,
+    tmp_path,
+):
+    ruta_json = tmp_path / f"combinado_{tipo_esperado}.json"
+
+    exit_code = run_pipeline(
+        f"examples/{archivo}",
+        json_output=str(ruta_json),
+    )
+    reporte = json.loads(ruta_json.read_text(encoding="utf-8"))
+    coincidencias = [
+        diagnostico
+        for diagnostico in reporte["diagnosticos"]
+        if diagnostico["tipo_error"] == tipo_esperado
+    ]
+
+    assert exit_code == 0
+    assert len(coincidencias) == 1
+    assert coincidencias[0]["arbol_sintactico"]["nombre"] == "Diagnostico"
+    assert reporte["resumen"]["desconocidos"] == 0
 
