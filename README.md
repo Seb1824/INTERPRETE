@@ -34,6 +34,10 @@ El avance actual incluye:
 20. Exportacion de resultados estructurados a JSON.
 21. Arbol sintactico de diagnosticos para representar la estructura interna de cada error.
 22. Analisis semantico propio para detectar advertencias simples sin depender solo de GCC.
+23. Deduplicacion cruzada e inteligente de diagnosticos internos de GCC mediante diccionarios (priorizando errores sobre advertencias).
+24. Deteccion estatica de division por cero literal mediante analisis de expresiones regulares.
+25. Sugerencias dinamicas que extraen el codigo fuente real del estudiante para mostrar correcciones in-line.
+26. Identificacion explicita de bibliotecas faltantes (como <stdio.h>) al invocar funciones estandar.
 
 ## Estructura Del Proyecto
 
@@ -58,6 +62,9 @@ COMPILADOR/
 │   ├── funcion_implicita.c
 │   ├── redeclaracion.c
 │   ├── retorno_incorrecto.c
+│   ├── semantico_asignacion.c
+│   ├── semantico_division_cero.c
+│   ├── semantico_falta_stdio.c
 │   ├── tipo_incompatible.c
 │   ├── variable_no_declarada.c
 │   ├── variable_no_inicializada.c
@@ -109,6 +116,8 @@ Antes de ejecutar GCC valida que:
 - la ruta corresponda a un archivo
 - el archivo tenga extension `.c`
 - el archivo pueda leerse como UTF-8
+
+Aplica una deduplicacion inteligente cruzando los analisis de GCC. Si GCC emite una advertencia redundante para un error ya registrado en la misma linea y para el mismo simbolo, el sistema la filtra priorizando siempre el error.
 
 Tambien muestra errores controlados si GCC no esta instalado, no puede ejecutarse o excede el tiempo maximo.
 
@@ -220,7 +229,9 @@ Realiza un analisis semantico basico directamente sobre el codigo fuente. No ree
 Actualmente detecta:
 
 - variables locales declaradas pero no utilizadas
-- funciones no `void` que pueden terminar sin retornar un valor
+- funciones no void que pueden terminar sin retornar un valor
+- division directa por cero literal usando analisis de expresiones regulares
+- asignaciones erradas = en lugar de comparaciones == en condiciones de if/while
 
 Los diagnosticos generados por este modulo usan `origen="semantico"`. Antes de mostrarlos, `main.py` los combina con los diagnosticos de GCC y evita duplicados claros por tipo de error, simbolo y ubicacion.
 
@@ -236,13 +247,14 @@ Explainer: transforma diagnosticos en explicaciones pedagogicas
 ### `src/explainer.py`
 
 Convierte un `DiagnosticEntry` en una explicacion pedagogica en espanol.
+Mediante introspeccion (inspect) y la extraccion de la linea cruda, el explainer es capaz de nutrirse del contexto dinamico del archivo fuente para ofrecer soluciones "in-line" precisas (como reescribir la linea del estudiante con el `;` que faltaba).
 
 Retorna:
 
 - `titulo`
 - `explicacion`
 - `causa_probable`
-- `sugerencia`
+- `sugerencia`(que puede contener la linea de codigo corregida)
 
 Ejemplo conceptual:
 
@@ -387,6 +399,9 @@ Archivos especificos para demostrar el analisis semantico propio:
 - `examples/semantico_variable_no_usada.c`
 - `examples/semantico_falta_retorno.c`
 - `examples/semantico_correcto.c`
+- `examples/semantico_division_cero.c`
+- `examples/semantico_falta_stdio.c`
+- `examples/semantico_asignacion.c`
 
 Los ejemplos de categorias ampliadas fueron compilados con GCC 13.2.0 para comprobar los mensajes reales emitidos y ajustar la clasificacion. `extension_mayuscula.C` comprueba que `.C` se acepte y se fuerce como lenguaje C, no C++.
 
@@ -440,10 +455,8 @@ mensaje crudo de GCC -> diagnostico estructurado -> explicacion pedagogica
 
 ## Pendientes
 
-- Mejorar sugerencias usando mas contexto del codigo.
-- Ampliar el analizador semantico con mas reglas propias.
+- Completar la aplicación de sugerencias dinámicas (linea_codigo) a las funciones de error restantes en explainer.py.
 - Ampliar patrones a medida que aparezcan nuevos mensajes de GCC.
-- Forzar un idioma estable para la salida de GCC.
 - Mejorar la extraccion de simbolos para las categorias nuevas.
 - Evaluar el sistema con estudiantes o casos reales de laboratorio.
 - Agregar una interfaz grafica o web si el proyecto crece.
