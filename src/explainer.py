@@ -16,21 +16,29 @@ def _extraer_linea_cruda(archivo: str, numero_linea: int) -> str:
     return ""
 
 def explain(entry):
-    # 1. Extraemos la línea de código problemática
     linea_codigo = _extraer_linea_cruda(entry.archivo, entry.linea)
     
-    # 2. Obtenemos la función correspondiente al error
     handler = _HANDLERS.get(entry.tipo_error, _explain_desconocido)
     
-    # 3. Solo le pasamos 'linea_codigo' si la función lo tiene en sus parámetros
     if "linea_codigo" in inspect.signature(handler).parameters:
         return handler(entry, linea_codigo)
         
-    # Si la función aún no ha sido actualizada, la llamamos normal
     return handler(entry)
 
-def _explain_undeclared(entry):
+def _explain_undeclared(entry, linea_codigo=""):
     simbolo = entry.simbolo or "desconocido"
+    
+    if linea_codigo:
+        sugerencia_dinamica = (
+            f"Asegúrate de declarar '{simbolo}' antes de esta línea:\n"
+            f"    {linea_codigo}"
+        )
+    else:
+        sugerencia_dinamica = (
+            f"Busca dónde usas '{simbolo}' (línea {entry.linea}) y asegúrate "
+            f"de haberlo declarado antes. Si es de biblioteca, revisa el #include."
+        )
+
     return {
         "titulo": f"Variable o función '{simbolo}' no declarada",
         "explicacion": (
@@ -43,10 +51,7 @@ def _explain_undeclared(entry):
             f"(C distingue mayúsculas de minúsculas), o falta el #include "
             f"que lo define."
         ),
-        "sugerencia": (
-            f"Busca dónde usas '{simbolo}' (línea {entry.linea}) y asegúrate "
-            f"de haberlo declarado antes. Si es de biblioteca, revisa el #include."
-        ),
+        "sugerencia": sugerencia_dinamica,
     }
 
 
@@ -169,7 +174,6 @@ def _explain_type_mismatch(entry):
         ),
     }
 
-
 def _explain_wrong_arguments(entry):
     simbolo = entry.simbolo or "la función"
     return {
@@ -251,7 +255,6 @@ def _explain_unused_variable(entry):
         ),
     }
 
-
 def _explain_division_by_zero(entry):
     return {
         "titulo": "División por cero detectada en tiempo de compilación",
@@ -273,7 +276,6 @@ def _explain_division_by_zero(entry):
         ),
     }
 
-
 def _explain_pointer_error(entry):
     simbolo = entry.simbolo or "el puntero"
     return {
@@ -292,7 +294,6 @@ def _explain_pointer_error(entry):
         ),
     }
 
-
 def _explain_format_mismatch(entry):
     return {
         "titulo": "Formato y argumentos incompatibles en una función de impresión",
@@ -310,9 +311,20 @@ def _explain_format_mismatch(entry):
         ),
     }
 
-
-def _explain_unbalanced_delimiter(entry):
+def _explain_unbalanced_delimiter(entry, linea_codigo=""):
     simbolo = entry.simbolo or "un delimitador"
+    
+    if linea_codigo:
+        sugerencia_dinamica = (
+            f"Revisa este fragmento de tu código en busca de un '{simbolo}' faltante o desbalanceado:\n"
+            f"    {linea_codigo}"
+        )
+    else:
+        sugerencia_dinamica = (
+            f"Revisa la línea {entry.linea} y las anteriores. Empareja (), [] y {{}} "
+            f"y verifica que todas las cadenas tengan comillas de apertura y cierre."
+        )
+
     return {
         "titulo": f"Delimitador '{simbolo}' faltante o desbalanceado",
         "explicacion": (
@@ -323,12 +335,8 @@ def _explain_unbalanced_delimiter(entry):
             "Falta un símbolo de cierre, existe uno adicional, o una cadena quedó sin "
             "comilla final. El error real puede estar varias líneas antes."
         ),
-        "sugerencia": (
-            f"Revisa la línea {entry.linea} y las anteriores. Empareja (), [] y {{}} "
-            "y verifica que todas las cadenas tengan comillas de apertura y cierre."
-        ),
+        "sugerencia": sugerencia_dinamica,
     }
-
 
 def _explain_missing_return(entry):
     simbolo = entry.simbolo or "la función"
@@ -348,7 +356,6 @@ def _explain_missing_return(entry):
         ),
     }
 
-
 def _explain_dangerous_conversion(entry):
     simbolo = entry.simbolo or "el valor"
     return {
@@ -366,7 +373,6 @@ def _explain_dangerous_conversion(entry):
             "de destino más amplio y valida el valor antes de convertirlo."
         ),
     }
-
 
 def _explain_uninitialized_variable(entry):
     simbolo = entry.simbolo or "la variable"
@@ -386,7 +392,6 @@ def _explain_uninitialized_variable(entry):
         ),
     }
 
-
 def _explain_struct_access(entry):
     simbolo = entry.simbolo or "el miembro"
     return {
@@ -405,7 +410,6 @@ def _explain_struct_access(entry):
         ),
     }
 
-
 def _explain_preprocessor_error(entry):
     simbolo = entry.simbolo or "la directiva"
     return {
@@ -423,7 +427,6 @@ def _explain_preprocessor_error(entry):
             "de #include y que cada #if/#ifdef tenga su #endif correspondiente."
         ),
     }
-
 
 def _explain_desconocido(entry):
     mensaje = entry.mensaje_crudo or "Sin mensaje disponible."
@@ -445,6 +448,26 @@ def _explain_desconocido(entry):
         ),
     }
 
+def _explain_assignment_in_condition(entry, linea_codigo=""):
+    if linea_codigo:
+        linea_corregida = linea_codigo.replace("=", "==")
+        sugerencia_dinamica = (
+            f"Cambia la asignación '=' por una comparación '=='. Debería quedar así:\n"
+            f"    {linea_corregida}"
+        )
+    else:
+        sugerencia_dinamica = "Cambia el '=' por '==' si tu intención era comparar."
+
+    return {
+        "titulo": "Asignación '=' en lugar de comparación '=='",
+        "explicacion": (
+            "Estás usando un solo '=' dentro de una condición. Esto asigna el valor a la "
+            "variable en lugar de comparar, lo que hace que la condición casi siempre sea "
+            "verdadera y arruine la lógica del programa."
+        ),
+        "causa_probable": "Es un clásico error de tipeo. Querías comparar valores (usando '==') pero escribiste una asignación (con un solo '=').",
+        "sugerencia": sugerencia_dinamica,
+    }
 
 # Tabla de despacho: tipo_error -> handler. Fallback: _explain_desconocido
 _HANDLERS = {
@@ -466,4 +489,5 @@ _HANDLERS = {
     "struct_access":        _explain_struct_access,
     "preprocessor_error":   _explain_preprocessor_error,
     "desconocido":          _explain_desconocido,
+    "assignment_in_condition": _explain_assignment_in_condition,
 }

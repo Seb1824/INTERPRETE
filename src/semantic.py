@@ -62,12 +62,36 @@ class SemanticAnalyzer:
 
         diagnosticos.extend(self._analizar_cabeceras(lineas, lineas_limpias))
         diagnosticos.extend(self._analizar_division_cero(lineas_limpias))
+        diagnosticos.extend(self._analizar_asignacion_condicion(lineas_limpias))
+ 
 
         for funcion in funciones:
             diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
             diagnosticos.extend(self._analizar_tipo_main(funcion)) 
 
+        return diagnosticos
+
+    def _analizar_asignacion_condicion(self, lineas_limpias: list[str]) -> list[DiagnosticEntry]:
+        diagnosticos: list[DiagnosticEntry] = []
+        import re
+        patron_asignacion = re.compile(r'\b(?:if|while)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*[^=].*\)')
+
+        for i, linea in enumerate(lineas_limpias):
+            match = patron_asignacion.search(linea)
+            if match:
+                diagnosticos.append(
+                    DiagnosticEntry(
+                        archivo=self.ruta_fuente,
+                        linea=i + 1,
+                        columna=match.start() + 1,
+                        severidad="warning",
+                        mensaje_crudo="analizador semantico: posible asignacion '=' en lugar de comparacion '=='",
+                        tipo_error="assignment_in_condition", # Reutilizamos esta categoría
+                        simbolo="=",
+                        origen="semantico",
+                    )
+                )
         return diagnosticos
 
     def _analizar_variables_no_usadas(self, funcion: _Funcion) -> list[DiagnosticEntry]:
