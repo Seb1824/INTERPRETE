@@ -188,6 +188,139 @@ def test_semantic_detecta_void_main(tmp_path):
     assert retorno.origen == "semantico"
 
 
+def test_semantic_construye_y_usa_ast_para_codigo_valido(tmp_path):
+    fuente = tmp_path / "ast_valido.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    analizador = SemanticAnalyzer(str(fuente))
+
+    diagnosticos = analizador.analizar()
+
+    assert diagnosticos == []
+    assert analizador.ast_codigo is not None
+    assert analizador.ast_codigo.tipo == "FileAST"
+    assert analizador.error_ast is None
+
+
+def test_semantic_ast_detecta_declaracion_multiple_no_usada(tmp_path):
+    fuente = tmp_path / "declaracion_multiple.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    int usada = 1, temporal = 2;\n"
+        "    return usada;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    no_usadas = [
+        diagnostico.simbolo
+        for diagnostico in diagnosticos
+        if diagnostico.tipo_error == "unused_variable"
+    ]
+
+    assert no_usadas == ["temporal"]
+
+
+def test_semantic_ast_acepta_funcion_multilinea_con_retorno(tmp_path):
+    fuente = tmp_path / "funcion_multilinea.c"
+    fuente.write_text(
+        "int\n"
+        "calcular(\n"
+        "    int numero\n"
+        ") {\n"
+        "    return numero;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert diagnosticos == []
+
+
+def test_semantic_ast_reconoce_retorno_en_if_else(tmp_path):
+    fuente = tmp_path / "retorno_if_else.c"
+    fuente.write_text(
+        "int signo(int numero) {\n"
+        "    if (numero >= 0) {\n"
+        "        return 1;\n"
+        "    } else {\n"
+        "        return -1;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "missing_return"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_ast_detecta_asignacion_anidada_en_condicion(tmp_path):
+    fuente = tmp_path / "asignacion_anidada.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    int x = 0;\n"
+        "    if ((x = 1) > 0) {\n"
+        "        return x;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    asignacion = _buscar_diagnostico(diagnosticos, "assignment_in_condition")
+
+    assert asignacion.linea == 3
+    assert asignacion.simbolo == "="
+
+
+def test_semantic_ast_detecta_divisor_constante_calculado(tmp_path):
+    fuente = tmp_path / "division_expresion_cero.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    int resultado = 10 / (2 - 2);\n"
+        "    return resultado;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    division = _buscar_diagnostico(diagnosticos, "division_by_zero")
+
+    assert division.linea == 2
+    assert division.simbolo == "/"
+
+
+def test_semantic_usa_respaldo_textual_si_ast_es_invalido(tmp_path):
+    fuente = tmp_path / "ast_invalido.c"
+    fuente.write_text(
+        "int main() {\n"
+        "    int x = 0\n"
+        "    if (x = 1) {\n"
+        "        return 1;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    analizador = SemanticAnalyzer(str(fuente))
+
+    diagnosticos = analizador.analizar()
+
+    assert analizador.ast_codigo is None
+    assert analizador.error_ast
+    _buscar_diagnostico(diagnosticos, "assignment_in_condition")
+
+
 def test_combinar_diagnosticos_evita_duplicados_por_tipo_y_simbolo():
     gcc = DiagnosticEntry(
         archivo="programa.c",

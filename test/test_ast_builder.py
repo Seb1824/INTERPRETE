@@ -9,6 +9,7 @@ def test_ast_codigo_representa_programa_c_real():
     tipos = {nodo.tipo for nodo in nodos}
 
     assert ast.tipo == "FileAST"
+    assert "atributos" in ast.to_dict()
     assert "FuncDef" in tipos
     assert "Decl" in tipos
     assert "FuncCall" in tipos
@@ -21,6 +22,7 @@ def test_ast_codigo_representa_programa_c_real():
     )
     assert funcion_main.linea == 3
     assert funcion_main.columna is not None
+    assert funcion_main.atributos["name"] == "main"
 
 
 def test_ast_codigo_ignora_comentarios_y_directivas_sin_perder_lineas(tmp_path):

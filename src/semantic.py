@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.ast_builder import ASTBuildError, SourceASTNode, construir_ast_codigo
 from src.parser import DiagnosticEntry
+from src.semantic_ast import ASTSemanticAnalyzer
 
 
 _TIPOS_C = (
@@ -59,10 +61,34 @@ class SemanticAnalyzer:
 
     def __init__(self, ruta_fuente: str):
         self.ruta_fuente = ruta_fuente
+        self.ast_codigo: SourceASTNode | None = None
+        self.error_ast: str | None = None
 
     def analizar(self) -> list[DiagnosticEntry]:
-        lineas = Path(self.ruta_fuente).read_text(encoding="utf-8").splitlines()
+        codigo = Path(self.ruta_fuente).read_text(encoding="utf-8")
+        lineas = codigo.splitlines()
         lineas_limpias = _limpiar_comentarios_y_cadenas(lineas)
+
+        try:
+            self.ast_codigo = construir_ast_codigo(self.ruta_fuente)
+        except ASTBuildError as exc:
+            self.error_ast = str(exc)
+            return self._analizar_con_expresiones_regulares(
+                lineas,
+                lineas_limpias,
+            )
+
+        return ASTSemanticAnalyzer(
+            self.ruta_fuente,
+            codigo,
+            self.ast_codigo,
+        ).analizar()
+
+    def _analizar_con_expresiones_regulares(
+        self,
+        lineas: list[str],
+        lineas_limpias: list[str],
+    ) -> list[DiagnosticEntry]:
         funciones = _extraer_funciones(lineas_limpias)
 
         diagnosticos: list[DiagnosticEntry] = []

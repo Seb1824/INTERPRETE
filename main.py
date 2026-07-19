@@ -2,7 +2,6 @@ import argparse
 import json
 from pathlib import Path
 
-from src.ast_builder import ASTBuildError, construir_ast_codigo
 from src.explainer import explain
 from src.lexer import Lexer, LexerError
 from src.parser import Parser, construir_arbol_diagnostico
@@ -341,14 +340,6 @@ def run_pipeline(
         print(f"[ERROR] {error_validacion}")
         return 1
 
-    ast_codigo = None
-    error_ast = None
-    if debug or json_output:
-        try:
-            ast_codigo = construir_ast_codigo(str(ruta))
-        except ASTBuildError as exc:
-            error_ast = str(exc)
-
     try:
         lexer = Lexer(str(ruta))
         stderr = lexer.compilar_y_capturar()
@@ -358,7 +349,10 @@ def run_pipeline(
         return 1
 
     diagnosticos_gcc = Parser(tokens).parse()
-    diagnosticos_semanticos = SemanticAnalyzer(str(ruta)).analizar()
+    analizador_semantico = SemanticAnalyzer(str(ruta))
+    diagnosticos_semanticos = analizador_semantico.analizar()
+    ast_codigo = analizador_semantico.ast_codigo
+    error_ast = analizador_semantico.error_ast
     diagnosticos = _combinar_diagnosticos(
         diagnosticos_gcc,
         diagnosticos_semanticos,

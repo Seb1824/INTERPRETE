@@ -1,0 +1,400 @@
+from __future__ import annotations
+
+import re
+
+from src.ast_builder import SourceASTNode, limpiar_comentarios_codigo
+from src.parser import DiagnosticEntry
+
+
+_PATRON_INCLUDE_STDIO = re.compile(r'#include\s*[<"]stdio\.h[>"]')
+_FUNCIONES_STDIO = {"printf", "scanf"}
+_NODOS_CON_CONDICION = {"If", "While", "DoWhile", "For"}
+
+
+class ASTSemanticAnalyzer:
+    """Aplica reglas semanticas recorriendo el AST del programa C."""
+
+    def __init__(
+        self,
+        ruta_fuente: str,
+        codigo_fuente: str,
+        ast_codigo: SourceASTNode,
+    ):
+        self.ruta_fuente = ruta_fuente
+        self.codigo_fuente = codigo_fuente
+        self.lineas = codigo_fuente.splitlines()
+        self.ast_codigo = ast_codigo
+
+    def analizar(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+        diagnosticos.extend(self._analizar_cabeceras())
+        diagnosticos.extend(self._analizar_division_cero())
+        diagnosticos.extend(self._analizar_asignaciones_en_condiciones())
+
+        for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
+            diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
+            diagnosticos.extend(self._analizar_retorno_faltante(funcion))
+            diagnosticos.extend(self._analizar_tipo_main(funcion))
+
+        return diagnosticos
+
+    def _analizar_cabeceras(self) -> list[DiagnosticEntry]:
+        codigo_sin_comentarios = limpiar_comentarios_codigo(self.codigo_fuente)
+        if _PATRON_INCLUDE_STDIO.search(codigo_sin_comentarios):
+            return []
+
+        for llamada in _buscar_nodos(self.ast_codigo, "FuncCall"):
+            nombre = _nombre_funcion_llamada(llamada)
+            if nombre not in _FUNCIONES_STDIO:
+                continue
+
+            return [
+                self._crear_diagnostico(
+                    nodo=llamada,
+                    severidad="error",
+                    mensaje=(
+                        f"analizador semantico AST: se uso '{nombre}' "
+                        "sin incluir la biblioteca <stdio.h>"
+                    ),
+                    tipo_error="implicit_declaration",
+                    simbolo=nombre,
+                )
+            ]
+
+        return []
+
+    def _analizar_division_cero(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+
+        for operacion in _buscar_nodos(self.ast_codigo, "BinaryOp"):
+            if operacion.atributos.get("op") != "/":
+                continue
+
+            divisor = _hijo_por_rol(operacion, "right")
+            if divisor is None or _evaluar_constante(divisor) != 0:
+                continue
+
+            diagnosticos.append(
+                self._crear_diagnostico(
+                    nodo=operacion,
+                    severidad="warning",
+                    mensaje=(
+                        "analizador semantico AST: division por una expresion "
+                        "constante igual a cero"
+                    ),
+                    tipo_error="division_by_zero",
+                    simbolo="/",
+                    columna=_buscar_columna_operador(operacion, "/", self.lineas),
+                )
+            )
+
+        return diagnosticos
+
+    def _analizar_asignaciones_en_condiciones(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+        ubicaciones_reportadas = set()
+
+        for control in _recorrer(self.ast_codigo):
+            if control.tipo not in _NODOS_CON_CONDICION:
+                continue
+
+            condicion = _hijo_por_rol(control, "cond")
+            if condicion is None:
+                continue
+
+            for asignacion in _buscar_nodos(condicion, "Assignment"):
+                if asignacion.atributos.get("op") != "=":
+                    continue
+
+                clave = (asignacion.linea, asignacion.columna)
+                if clave in ubicaciones_reportadas:
+                    continue
+                ubicaciones_reportadas.add(clave)
+
+                diagnosticos.append(
+                    self._crear_diagnostico(
+                        nodo=asignacion,
+                        severidad="warning",
+                        mensaje=(
+                            "analizador semantico AST: posible asignacion '=' "
+                            "en lugar de comparacion '=='"
+                        ),
+                        tipo_error="assignment_in_condition",
+                        simbolo="=",
+                        columna=_buscar_columna_operador(
+                            asignacion,
+                            "=",
+                            self.lineas,
+                        ),
+                    )
+                )
+
+        return diagnosticos
+
+    def _analizar_variables_no_usadas(
+        self,
+        funcion: SourceASTNode,
+    ) -> list[DiagnosticEntry]:
+        cuerpo = _hijo_por_rol(funcion, "body")
+        if cuerpo is None:
+            return []
+
+        usos = {}
+        for identificador in _buscar_nodos(cuerpo, "ID"):
+            nombre = identificador.atributos.get("name")
+            if nombre:
+                usos[nombre] = usos.get(nombre, 0) + 1
+
+        diagnosticos = []
+        for declaracion in _buscar_nodos(cuerpo, "Decl"):
+            nombre = declaracion.atributos.get("name")
+            if not nombre or _es_declaracion_funcion(declaracion):
+                continue
+            if usos.get(nombre, 0) > 0:
+                continue
+
+            diagnosticos.append(
+                self._crear_diagnostico(
+                    nodo=declaracion,
+                    severidad="warning",
+                    mensaje=(
+                        f"analizador semantico AST: variable '{nombre}' "
+                        "declarada pero no utilizada"
+                    ),
+                    tipo_error="unused_variable",
+                    simbolo=nombre,
+                )
+            )
+
+        return diagnosticos
+
+    def _analizar_retorno_faltante(
+        self,
+        funcion: SourceASTNode,
+    ) -> list[DiagnosticEntry]:
+        tipo_retorno = _tipo_retorno_funcion(funcion)
+        if not tipo_retorno or tipo_retorno == "void":
+            return []
+
+        cuerpo = _hijo_por_rol(funcion, "body")
+        if cuerpo is not None and _siempre_retorna(cuerpo):
+            return []
+
+        nombre, declaracion = _nombre_y_declaracion_funcion(funcion)
+        return [
+            self._crear_diagnostico(
+                nodo=declaracion or funcion,
+                severidad="warning",
+                mensaje=(
+                    f"analizador semantico AST: la funcion '{nombre}' "
+                    "puede terminar sin retornar un valor"
+                ),
+                tipo_error="missing_return",
+                simbolo=nombre,
+            )
+        ]
+
+    def _analizar_tipo_main(
+        self,
+        funcion: SourceASTNode,
+    ) -> list[DiagnosticEntry]:
+        nombre, declaracion = _nombre_y_declaracion_funcion(funcion)
+        if nombre != "main" or _tipo_retorno_funcion(funcion) != "void":
+            return []
+
+        return [
+            self._crear_diagnostico(
+                nodo=declaracion or funcion,
+                severidad="warning",
+                mensaje=(
+                    "analizador semantico AST: la funcion principal 'main' "
+                    "deberia retornar 'int' en lugar de 'void'"
+                ),
+                tipo_error="return_error",
+                simbolo="main",
+            )
+        ]
+
+    def _crear_diagnostico(
+        self,
+        nodo: SourceASTNode,
+        severidad: str,
+        mensaje: str,
+        tipo_error: str,
+        simbolo: str,
+        columna: int | None = None,
+    ) -> DiagnosticEntry:
+        return DiagnosticEntry(
+            archivo=self.ruta_fuente,
+            linea=nodo.linea or 1,
+            columna=columna or nodo.columna or 1,
+            severidad=severidad,
+            mensaje_crudo=mensaje,
+            tipo_error=tipo_error,
+            simbolo=simbolo,
+            origen="semantico",
+        )
+
+
+def _recorrer(nodo: SourceASTNode):
+    yield nodo
+    for hijo in nodo.hijos:
+        yield from _recorrer(hijo)
+
+
+def _buscar_nodos(nodo: SourceASTNode, tipo: str):
+    return (actual for actual in _recorrer(nodo) if actual.tipo == tipo)
+
+
+def _hijo_por_rol(
+    nodo: SourceASTNode,
+    rol: str,
+) -> SourceASTNode | None:
+    for hijo in nodo.hijos:
+        if hijo.rol == rol:
+            return hijo
+    return None
+
+
+def _nombre_funcion_llamada(llamada: SourceASTNode) -> str | None:
+    nombre = _hijo_por_rol(llamada, "name")
+    if nombre is None or nombre.tipo != "ID":
+        return None
+    return nombre.atributos.get("name")
+
+
+def _nombre_y_declaracion_funcion(
+    funcion: SourceASTNode,
+) -> tuple[str, SourceASTNode | None]:
+    declaracion = _hijo_por_rol(funcion, "decl")
+    if declaracion is None:
+        return "la funcion", None
+    return declaracion.atributos.get("name", "la funcion"), declaracion
+
+
+def _tipo_retorno_funcion(funcion: SourceASTNode) -> str | None:
+    actual = _hijo_por_rol(funcion, "decl")
+
+    while actual is not None:
+        if actual.tipo == "IdentifierType":
+            return actual.atributos.get("names")
+        actual = _hijo_por_rol(actual, "type")
+
+    return None
+
+
+def _es_declaracion_funcion(declaracion: SourceASTNode) -> bool:
+    tipo = _hijo_por_rol(declaracion, "type")
+    return tipo is not None and tipo.tipo == "FuncDecl"
+
+
+def _siempre_retorna(nodo: SourceASTNode) -> bool:
+    if nodo.tipo == "Return":
+        return True
+
+    if nodo.tipo == "Compound":
+        for hijo in nodo.hijos:
+            if hijo.rol and hijo.rol.startswith("block_items["):
+                if _siempre_retorna(hijo):
+                    return True
+        return False
+
+    if nodo.tipo == "If":
+        rama_verdadera = _hijo_por_rol(nodo, "iftrue")
+        rama_falsa = _hijo_por_rol(nodo, "iffalse")
+        return (
+            rama_verdadera is not None
+            and rama_falsa is not None
+            and _siempre_retorna(rama_verdadera)
+            and _siempre_retorna(rama_falsa)
+        )
+
+    if nodo.tipo in {"Label", "Case", "Default"}:
+        return any(_siempre_retorna(hijo) for hijo in nodo.hijos)
+
+    return False
+
+
+def _evaluar_constante(nodo: SourceASTNode) -> float | int | None:
+    if nodo.tipo == "Constant":
+        valor = nodo.atributos.get("value")
+        if valor is None:
+            return None
+        return _convertir_numero_c(valor)
+
+    if nodo.tipo == "UnaryOp":
+        operando = _hijo_por_rol(nodo, "expr")
+        valor = _evaluar_constante(operando) if operando else None
+        if valor is None:
+            return None
+        operador = nodo.atributos.get("op")
+        if operador == "+":
+            return valor
+        if operador == "-":
+            return -valor
+        return None
+
+    if nodo.tipo == "BinaryOp":
+        izquierda = _hijo_por_rol(nodo, "left")
+        derecha = _hijo_por_rol(nodo, "right")
+        valor_izquierdo = _evaluar_constante(izquierda) if izquierda else None
+        valor_derecho = _evaluar_constante(derecha) if derecha else None
+        if valor_izquierdo is None or valor_derecho is None:
+            return None
+
+        operador = nodo.atributos.get("op")
+        if operador == "+":
+            return valor_izquierdo + valor_derecho
+        if operador == "-":
+            return valor_izquierdo - valor_derecho
+        if operador == "*":
+            return valor_izquierdo * valor_derecho
+        if operador == "/" and valor_derecho != 0:
+            return valor_izquierdo / valor_derecho
+        if operador == "%" and valor_derecho != 0:
+            return valor_izquierdo % valor_derecho
+        return None
+
+    if nodo.tipo == "Cast":
+        expresion = _hijo_por_rol(nodo, "expr")
+        return _evaluar_constante(expresion) if expresion else None
+
+    return None
+
+
+def _convertir_numero_c(valor: str) -> float | int | None:
+    sin_sufijo = re.sub(r"[uUlLfF]+$", "", valor)
+    try:
+        if any(caracter in sin_sufijo for caracter in ".eEpP"):
+            return float(sin_sufijo)
+        if re.fullmatch(r"0[0-7]+", sin_sufijo):
+            return int(sin_sufijo, 8)
+        return int(sin_sufijo, 0)
+    except ValueError:
+        return None
+
+
+def _buscar_columna_operador(
+    nodo: SourceASTNode,
+    operador: str,
+    lineas: list[str],
+) -> int:
+    if nodo.linea is None or not 1 <= nodo.linea <= len(lineas):
+        return nodo.columna or 1
+
+    linea = lineas[nodo.linea - 1]
+    inicio = max((nodo.columna or 1) - 1, 0)
+
+    if operador == "=":
+        coincidencia = re.search(
+            r"(?<![=!<>+\-*/%&|^])=(?!=)",
+            linea[inicio:],
+        )
+        if coincidencia:
+            return inicio + coincidencia.start() + 1
+    else:
+        posicion = linea.find(operador, inicio)
+        if posicion >= 0:
+            return posicion + 1
+
+    return nodo.columna or 1

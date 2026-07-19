@@ -25,6 +25,7 @@ class ASTSourceReadError(ASTBuildError):
 class SourceASTNode:
     tipo: str
     valor: str | None = None
+    atributos: dict[str, str] = field(default_factory=dict)
     rol: str | None = None
     linea: int | None = None
     columna: int | None = None
@@ -34,6 +35,7 @@ class SourceASTNode:
         return {
             "tipo": self.tipo,
             "valor": self.valor,
+            "atributos": self.atributos,
             "rol": self.rol,
             "linea": self.linea,
             "columna": self.columna,
@@ -93,9 +95,11 @@ def construir_ast_codigo(ruta_fuente: str) -> SourceASTNode:
 
 def _convertir_nodo(nodo: Any, rol: str | None = None) -> SourceASTNode:
     coordenada = getattr(nodo, "coord", None)
+    atributos = _extraer_atributos(nodo)
     convertido = SourceASTNode(
         tipo=type(nodo).__name__,
-        valor=_describir_nodo(nodo),
+        valor=_describir_atributos(atributos),
+        atributos=atributos,
         rol=rol,
         linea=getattr(coordenada, "line", None),
         columna=getattr(coordenada, "column", None),
@@ -107,25 +111,31 @@ def _convertir_nodo(nodo: Any, rol: str | None = None) -> SourceASTNode:
     return convertido
 
 
-def _describir_nodo(nodo: Any) -> str | None:
-    atributos = []
+def _extraer_atributos(nodo: Any) -> dict[str, str]:
+    atributos = {}
     for nombre in getattr(nodo, "attr_names", ()):
         valor = getattr(nodo, nombre, None)
         if valor is None or valor == [] or valor == ():
             continue
         if isinstance(valor, (list, tuple)):
             valor = " ".join(str(elemento) for elemento in valor)
-        atributos.append(f"{nombre}={valor}")
+        atributos[nombre] = str(valor)
 
-    return ", ".join(atributos) or None
+    return atributos
+
+
+def _describir_atributos(atributos: dict[str, str]) -> str | None:
+    partes = [f"{nombre}={valor}" for nombre, valor in atributos.items()]
+    return ", ".join(partes) or None
 
 
 def _preparar_codigo_para_parser(codigo: str) -> str:
-    sin_comentarios = _reemplazar_comentarios_por_espacios(codigo)
+    sin_comentarios = limpiar_comentarios_codigo(codigo)
     return _reemplazar_directivas_por_espacios(sin_comentarios)
 
 
-def _reemplazar_comentarios_por_espacios(codigo: str) -> str:
+def limpiar_comentarios_codigo(codigo: str) -> str:
+    """Reemplaza comentarios por espacios sin alterar lineas ni columnas."""
     resultado = list(codigo)
     i = 0
     estado = "codigo"
