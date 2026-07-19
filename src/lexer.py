@@ -284,6 +284,10 @@ def _extraer_simbolo_especifico(
     if tipo_error in {"missing_return", "return_error"} and funcion_contexto:
         return funcion_contexto
 
+    if tipo_error == "type_mismatch" and funcion_contexto:
+        if re.search(r"\breturning\b", mensaje, re.IGNORECASE):
+            return funcion_contexto
+
     if tipo_error == "assignment_in_condition":
         return "="
 

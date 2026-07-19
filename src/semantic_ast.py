@@ -63,6 +63,8 @@ class ASTSemanticAnalyzer:
         for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
             diagnosticos.extend(self._analizar_tipo_main(funcion))
+            diagnosticos.extend(self._analizar_tipo_retorno(funcion))  
+
 
         return diagnosticos
 
@@ -402,6 +404,47 @@ class ASTSemanticAnalyzer:
                 simbolo="main",
             )
         ]
+    
+    def _analizar_tipo_retorno(
+        self,
+        funcion: SourceASTNode,
+    ) -> list[DiagnosticEntry]:
+        tipo_retorno = _tipo_retorno_funcion(funcion)
+        if not tipo_retorno or tipo_retorno == "void":
+            return []
+
+        nombre, _ = _nombre_y_declaracion_funcion(funcion)
+        cuerpo = _hijo_por_rol(funcion, "body")
+        if cuerpo is None:
+            return []
+
+        diagnosticos = []
+        for nodo_return in _buscar_nodos(cuerpo, "Return"):
+            expr = _hijo_por_rol(nodo_return, "expr")
+            if expr is None:
+                continue
+
+            tipo_expresion = _inferir_tipo_expresion(expr, self.tabla_simbolos)
+            if tipo_expresion is None:
+                continue
+            if _tipos_compatibles(tipo_retorno, tipo_expresion):
+                continue
+
+            diagnosticos.append(
+                self._crear_diagnostico(
+                    nodo=nodo_return,
+                    severidad="warning",
+                    mensaje=(
+                        f"analizador semantico AST: la funcion '{nombre}' "
+                        f"declara retornar '{tipo_retorno}' pero devuelve "
+                        f"un valor de tipo '{tipo_expresion}'"
+                    ),
+                    tipo_error="return_error",
+                    simbolo=nombre,
+                )
+            )
+
+        return diagnosticos
 
     def _crear_diagnostico(
         self,
@@ -466,8 +509,20 @@ def _tipo_retorno_funcion(funcion: SourceASTNode) -> str | None:
     while actual is not None:
         if actual.tipo == "IdentifierType":
             return actual.atributos.get("names")
+        if actual.tipo == "PtrDecl":
+            interno = _hijo_por_rol(actual, "type")
+            base = _tipo_retorno_funcion_desde(interno)
+            return f"{base} *" if base else None
         actual = _hijo_por_rol(actual, "type")
 
+    return None
+
+
+def _tipo_retorno_funcion_desde(nodo: SourceASTNode | None) -> str | None:
+    while nodo is not None:
+        if nodo.tipo == "IdentifierType":
+            return nodo.atributos.get("names")
+        nodo = _hijo_por_rol(nodo, "type")
     return None
 
 
