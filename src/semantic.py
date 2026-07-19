@@ -7,6 +7,7 @@ from pathlib import Path
 from src.ast_builder import ASTBuildError, SourceASTNode, construir_ast_codigo
 from src.parser import DiagnosticEntry
 from src.semantic_ast import ASTSemanticAnalyzer
+from src.symbol_table import SymbolTable
 
 
 _TIPOS_C = (
@@ -63,6 +64,7 @@ class SemanticAnalyzer:
         self.ruta_fuente = ruta_fuente
         self.ast_codigo: SourceASTNode | None = None
         self.error_ast: str | None = None
+        self.tabla_simbolos: SymbolTable | None = None
 
     def analizar(self) -> list[DiagnosticEntry]:
         codigo = Path(self.ruta_fuente).read_text(encoding="utf-8")
@@ -78,11 +80,14 @@ class SemanticAnalyzer:
                 lineas_limpias,
             )
 
-        return ASTSemanticAnalyzer(
+        analizador_ast = ASTSemanticAnalyzer(
             self.ruta_fuente,
             codigo,
             self.ast_codigo,
-        ).analizar()
+        )
+        diagnosticos = analizador_ast.analizar()
+        self.tabla_simbolos = analizador_ast.tabla_simbolos
+        return diagnosticos
 
     def _analizar_con_expresiones_regulares(
         self,

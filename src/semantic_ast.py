@@ -4,10 +4,19 @@ import re
 
 from src.ast_builder import SourceASTNode, limpiar_comentarios_codigo
 from src.parser import DiagnosticEntry
+from src.symbol_table import Symbol, construir_tabla_simbolos
 
 
 _PATRON_INCLUDE_STDIO = re.compile(r'#include\s*[<"]stdio\.h[>"]')
-_FUNCIONES_STDIO = {"printf", "scanf"}
+_FUNCIONES_STDIO = {
+    "fgets",
+    "fputs",
+    "getchar",
+    "printf",
+    "putchar",
+    "puts",
+    "scanf",
+}
 _NODOS_CON_CONDICION = {"If", "While", "DoWhile", "For"}
 
 
@@ -24,23 +33,38 @@ class ASTSemanticAnalyzer:
         self.codigo_fuente = codigo_fuente
         self.lineas = codigo_fuente.splitlines()
         self.ast_codigo = ast_codigo
+        self.codigo_sin_comentarios = limpiar_comentarios_codigo(codigo_fuente)
+        self.tiene_stdio = bool(
+            _PATRON_INCLUDE_STDIO.search(self.codigo_sin_comentarios)
+        )
+        externos = set()
+        if self.tiene_stdio:
+            externos = {
+                nombre
+                for llamada in _buscar_nodos(ast_codigo, "FuncCall")
+                if (nombre := _nombre_funcion_llamada(llamada))
+                in _FUNCIONES_STDIO
+            }
+        self.tabla_simbolos = construir_tabla_simbolos(
+            ast_codigo,
+            simbolos_externos=externos,
+        )
 
     def analizar(self) -> list[DiagnosticEntry]:
         diagnosticos = []
         diagnosticos.extend(self._analizar_cabeceras())
         diagnosticos.extend(self._analizar_division_cero())
         diagnosticos.extend(self._analizar_asignaciones_en_condiciones())
+        diagnosticos.extend(self._analizar_simbolos_no_usados())
 
         for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
-            diagnosticos.extend(self._analizar_variables_no_usadas(funcion))
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
             diagnosticos.extend(self._analizar_tipo_main(funcion))
 
         return diagnosticos
 
     def _analizar_cabeceras(self) -> list[DiagnosticEntry]:
-        codigo_sin_comentarios = limpiar_comentarios_codigo(self.codigo_fuente)
-        if _PATRON_INCLUDE_STDIO.search(codigo_sin_comentarios):
+        if self.tiene_stdio:
             return []
 
         for llamada in _buscar_nodos(self.ast_codigo, "FuncCall"):
@@ -131,42 +155,55 @@ class ASTSemanticAnalyzer:
 
         return diagnosticos
 
-    def _analizar_variables_no_usadas(
-        self,
-        funcion: SourceASTNode,
-    ) -> list[DiagnosticEntry]:
-        cuerpo = _hijo_por_rol(funcion, "body")
-        if cuerpo is None:
-            return []
-
-        usos = {}
-        for identificador in _buscar_nodos(cuerpo, "ID"):
-            nombre = identificador.atributos.get("name")
-            if nombre:
-                usos[nombre] = usos.get(nombre, 0) + 1
-
+    def _analizar_simbolos_no_usados(self) -> list[DiagnosticEntry]:
         diagnosticos = []
-        for declaracion in _buscar_nodos(cuerpo, "Decl"):
-            nombre = declaracion.atributos.get("name")
-            if not nombre or _es_declaracion_funcion(declaracion):
+        for simbolo in self.tabla_simbolos.todos_los_simbolos():
+            if simbolo.clase not in {"variable", "parametro"}:
                 continue
-            if usos.get(nombre, 0) > 0:
+
+            ambito = self.tabla_simbolos.buscar_ambito(simbolo.ambito_id)
+            if ambito is None or ambito.clase == "global":
                 continue
+            if simbolo.cantidad_usos > 0:
+                continue
+
+            descripcion = (
+                "parametro"
+                if simbolo.clase == "parametro"
+                else "variable"
+            )
 
             diagnosticos.append(
-                self._crear_diagnostico(
-                    nodo=declaracion,
+                self._crear_diagnostico_simbolo(
+                    simbolo=simbolo,
                     severidad="warning",
                     mensaje=(
-                        f"analizador semantico AST: variable '{nombre}' "
-                        "declarada pero no utilizada"
+                        f"analizador semantico AST: {descripcion} "
+                        f"'{simbolo.nombre}' declarado pero no utilizado"
                     ),
                     tipo_error="unused_variable",
-                    simbolo=nombre,
                 )
             )
 
         return diagnosticos
+
+    def _crear_diagnostico_simbolo(
+        self,
+        simbolo: Symbol,
+        severidad: str,
+        mensaje: str,
+        tipo_error: str,
+    ) -> DiagnosticEntry:
+        return DiagnosticEntry(
+            archivo=self.ruta_fuente,
+            linea=simbolo.linea_declaracion,
+            columna=simbolo.columna_declaracion,
+            severidad=severidad,
+            mensaje_crudo=mensaje,
+            tipo_error=tipo_error,
+            simbolo=simbolo.nombre,
+            origen="semantico",
+        )
 
     def _analizar_retorno_faltante(
         self,
@@ -281,11 +318,6 @@ def _tipo_retorno_funcion(funcion: SourceASTNode) -> str | None:
         actual = _hijo_por_rol(actual, "type")
 
     return None
-
-
-def _es_declaracion_funcion(declaracion: SourceASTNode) -> bool:
-    tipo = _hijo_por_rol(declaracion, "type")
-    return tipo is not None and tipo.tipo == "FuncDecl"
 
 
 def _siempre_retorna(nodo: SourceASTNode) -> bool:

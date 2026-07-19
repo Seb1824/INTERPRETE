@@ -347,6 +347,36 @@ def test_combinar_diagnosticos_evita_duplicados_por_tipo_y_simbolo():
     assert combinados == [gcc]
 
 
+def test_combinar_conserva_simbolos_homonimos_de_ambitos_distintos():
+    primer_ambito = DiagnosticEntry(
+        archivo="programa.c",
+        linea=3,
+        columna=9,
+        severidad="warning",
+        mensaje_crudo="variable local no utilizada",
+        tipo_error="unused_variable",
+        simbolo="temporal",
+        origen="semantico",
+    )
+    segundo_ambito = DiagnosticEntry(
+        archivo="programa.c",
+        linea=9,
+        columna=13,
+        severidad="warning",
+        mensaje_crudo="variable sombreada no utilizada",
+        tipo_error="unused_variable",
+        simbolo="temporal",
+        origen="semantico",
+    )
+
+    combinados = _combinar_diagnosticos(
+        [],
+        [primer_ambito, segundo_ambito],
+    )
+
+    assert combinados == [primer_ambito, segundo_ambito]
+
+
 def test_semantic_ejemplo_variable_no_usada():
     diagnosticos = SemanticAnalyzer(
         "examples/semantico_variable_no_usada.c"

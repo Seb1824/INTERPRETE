@@ -68,18 +68,23 @@ def _combinar_diagnosticos(diagnosticos_gcc, diagnosticos_semanticos):
     for semantico in diagnosticos_semanticos:
         duplicado = any(
             existente.tipo_error == semantico.tipo_error
+            and existente.archivo == semantico.archivo
             and (
                 (
-                    semantico.simbolo
-                    and existente.simbolo
-                    and existente.simbolo == semantico.simbolo
+                    existente.linea == semantico.linea
+                    and (
+                        not existente.simbolo
+                        or not semantico.simbolo
+                        or existente.simbolo == semantico.simbolo
+                    )
                 )
                 or (
-                    existente.archivo == semantico.archivo
-                    and existente.linea == semantico.linea
+                    semantico.tipo_error in {"missing_return", "return_error"}
+                    and semantico.simbolo
+                    and existente.simbolo == semantico.simbolo
                 )
             )
-            for existente in combinados
+            for existente in gcc_limpios
         )
         if not duplicado:
             combinados.append(semantico)
@@ -132,6 +137,7 @@ def _construir_reporte_json(
     diagnosticos,
     ast_codigo=None,
     error_ast: str | None = None,
+    tabla_simbolos=None,
 ) -> dict:
     resumen = _calcular_resumen_clasificacion(diagnosticos)
     elementos = []
@@ -176,6 +182,11 @@ def _construir_reporte_json(
         "diagnosticos": elementos,
         "ast_codigo": ast_codigo.to_dict() if ast_codigo else None,
         "error_ast": error_ast,
+        "tabla_simbolos": (
+            tabla_simbolos.to_dict()
+            if tabla_simbolos
+            else None
+        ),
     }
 
 
@@ -185,6 +196,7 @@ def _exportar_json(
     diagnosticos,
     ast_codigo=None,
     error_ast: str | None = None,
+    tabla_simbolos=None,
 ) -> None:
     destino = Path(ruta_salida)
     destino.parent.mkdir(parents=True, exist_ok=True)
@@ -193,6 +205,7 @@ def _exportar_json(
         diagnosticos,
         ast_codigo=ast_codigo,
         error_ast=error_ast,
+        tabla_simbolos=tabla_simbolos,
     )
     destino.write_text(
         json.dumps(reporte, ensure_ascii=False, indent=2),
@@ -207,6 +220,7 @@ def _imprimir_salida_debug(
     diagnosticos_semanticos=None,
     ast_codigo=None,
     error_ast: str | None = None,
+    tabla_simbolos=None,
 ) -> None:
     print("=== STDERR CRUDO (GCC) ===")
     print(stderr.strip() or "(sin salida)")
@@ -226,6 +240,15 @@ def _imprimir_salida_debug(
         print(f"(no disponible: {error_ast})")
     else:
         print("(sin AST)")
+
+    print("\n=== TABLA DE SIMBOLOS ===")
+    if tabla_simbolos:
+        for linea in tabla_simbolos.render():
+            print(linea)
+    elif error_ast:
+        print("(no disponible porque no se pudo construir el AST)")
+    else:
+        print("(sin tabla de simbolos)")
 
     print("\n=== DIAGNOSTICOS (PARSER) ===")
     if not diagnosticos:
@@ -353,6 +376,7 @@ def run_pipeline(
     diagnosticos_semanticos = analizador_semantico.analizar()
     ast_codigo = analizador_semantico.ast_codigo
     error_ast = analizador_semantico.error_ast
+    tabla_simbolos = analizador_semantico.tabla_simbolos
     diagnosticos = _combinar_diagnosticos(
         diagnosticos_gcc,
         diagnosticos_semanticos,
@@ -366,6 +390,7 @@ def run_pipeline(
                 diagnosticos,
                 ast_codigo=ast_codigo,
                 error_ast=error_ast,
+                tabla_simbolos=tabla_simbolos,
             )
         except OSError as exc:
             print(f"[ERROR] No se pudo guardar el archivo JSON '{json_output}': {exc}")
@@ -379,6 +404,7 @@ def run_pipeline(
             diagnosticos_semanticos=diagnosticos_semanticos,
             ast_codigo=ast_codigo,
             error_ast=error_ast,
+            tabla_simbolos=tabla_simbolos,
         )
         print()
 

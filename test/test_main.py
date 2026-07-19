@@ -87,6 +87,7 @@ def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):
     assert "=== STDERR CRUDO (GCC) ===" in salida
     assert "=== TOKENS ===" in salida
     assert "=== AST DEL CODIGO C ===" in salida
+    assert "=== TABLA DE SIMBOLOS ===" in salida
     assert "=== DIAGNOSTICOS (PARSER) ===" in salida
     assert "=== ANALISIS SEMANTICO PROPIO ===" in salida
     assert "=== ARBOL SINTACTICO DE DIAGNOSTICOS ===" in salida
@@ -234,6 +235,7 @@ def test_run_pipeline_exporta_json_vacio_para_codigo_correcto(tmp_path):
     assert reporte["ast_codigo"]["tipo"] == "FileAST"
     assert reporte["ast_codigo"]["hijos"]
     assert reporte["error_ast"] is None
+    assert reporte["tabla_simbolos"]["ambito_global"]["clase"] == "global"
 
 
 def test_run_pipeline_json_con_codigo_invalido_conserva_diagnosticos(tmp_path):
@@ -249,6 +251,7 @@ def test_run_pipeline_json_con_codigo_invalido_conserva_diagnosticos(tmp_path):
     assert reporte["diagnosticos"]
     assert reporte["ast_codigo"] is None
     assert reporte["error_ast"]
+    assert reporte["tabla_simbolos"] is None
 
 
 @pytest.mark.parametrize(
