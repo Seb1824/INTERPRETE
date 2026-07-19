@@ -23,6 +23,7 @@ class Symbol:
     ambito_id: str
     linea_declaracion: int
     columna_declaracion: int
+    tipos_parametros: list[str] = field(default_factory=list)
     usos: list[SymbolUse] = field(default_factory=list)
 
     @property
@@ -42,6 +43,7 @@ class Symbol:
             "columna_declaracion": self.columna_declaracion,
             "cantidad_usos": self.cantidad_usos,
             "usos": [uso.to_dict() for uso in self.usos],
+            "tipos_parametros": self.tipos_parametros,
         }
 
 
@@ -306,6 +308,14 @@ class SymbolTableBuilder:
                 self.tabla.ambito_global,
                 clase="funcion",
             )
+            
+        simbolo_funcion = self.tabla.ambito_global.buscar_local(nombre)
+        if simbolo_funcion is not None:
+            simbolo_funcion.tipos_parametros = [
+                _describir_tipo(_hijo_por_rol(param, "type"))
+                for param in _parametros_de_funcion(declaracion)
+            ]
+
         self.funciones_definidas.add(nombre)
         ambito_funcion = self.tabla.crear_ambito(
             clase="funcion",

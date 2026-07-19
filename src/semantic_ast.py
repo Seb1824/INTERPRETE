@@ -59,6 +59,7 @@ class ASTSemanticAnalyzer:
         diagnosticos.extend(self._analizar_asignaciones_en_condiciones())
         diagnosticos.extend(self._analizar_simbolos_no_usados())
         diagnosticos.extend(self._analizar_tipos_asignacion())
+        diagnosticos.extend(self._analizar_argumentos_llamadas())
 
         for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
@@ -326,6 +327,46 @@ class ASTSemanticAnalyzer:
                         f"tipo incompatible ({tipo_derecho})"
                     ),
                     tipo_error="type_mismatch",
+                    simbolo=nombre,
+                )
+            )
+
+        return diagnosticos
+    
+    def _analizar_argumentos_llamadas(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+
+        for llamada in _buscar_nodos(self.ast_codigo, "FuncCall"):
+            nombre = _nombre_funcion_llamada(llamada)
+            if not nombre:
+                continue
+
+            simbolo = self.tabla_simbolos.resolver(
+                nombre,
+                self.tabla_simbolos.ambito_global,
+            )
+            if simbolo is None or simbolo.clase not in {"funcion", "funcion_externa"}:
+                continue
+            if not simbolo.tipos_parametros:
+                continue
+
+            args = _hijo_por_rol(llamada, "args")
+            cantidad_real = len(args.hijos) if args is not None else 0
+            cantidad_esperada = len(simbolo.tipos_parametros)
+
+            if cantidad_real == cantidad_esperada:
+                continue
+
+            diagnosticos.append(
+                self._crear_diagnostico(
+                    nodo=llamada,
+                    severidad="error",
+                    mensaje=(
+                        f"analizador semantico AST: la funcion '{nombre}' "
+                        f"espera {cantidad_esperada} argumento(s) "
+                        f"pero se le paso {cantidad_real}"
+                    ),
+                    tipo_error="wrong_arguments",
                     simbolo=nombre,
                 )
             )
