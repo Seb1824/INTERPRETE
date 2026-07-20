@@ -60,6 +60,7 @@ class ASTSemanticAnalyzer:
         diagnosticos.extend(self._analizar_simbolos_no_usados())
         diagnosticos.extend(self._analizar_tipos_asignacion())
         diagnosticos.extend(self._analizar_argumentos_llamadas())
+        diagnosticos.extend(self._analizar_variables_no_inicializadas())
 
         for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
             diagnosticos.extend(self._analizar_retorno_faltante(funcion))
@@ -370,6 +371,64 @@ class ASTSemanticAnalyzer:
                     simbolo=nombre,
                 )
             )
+
+        return diagnosticos
+    
+    def _analizar_variables_no_inicializadas(self) -> list[DiagnosticEntry]:
+        diagnosticos = []
+
+        for funcion in _buscar_nodos(self.ast_codigo, "FuncDef"):
+            cuerpo = _hijo_por_rol(funcion, "body")
+            if cuerpo is None:
+                continue
+
+            for decl in _buscar_nodos(cuerpo, "Decl"):
+                nombre = decl.atributos.get("name")
+                if not nombre:
+                    continue
+
+                if _hijo_por_rol(decl, "init") is not None:
+                    continue
+
+                tipo = _hijo_por_rol(decl, "type")
+                if tipo is not None and tipo.tipo in {"FuncDecl", "PtrDecl"}:
+                    continue
+
+                for uso in _buscar_nodos(cuerpo, "ID"):
+                    if uso.atributos.get("name") != nombre:
+                        continue
+                    if uso.linea is None or decl.linea is None:
+                        continue
+                    if uso.linea <= decl.linea:
+                        continue
+
+                    asignada = False
+                    for asignacion in _buscar_nodos(cuerpo, "Assignment"):
+                        lvalue = _hijo_por_rol(asignacion, "lvalue")
+                        if lvalue is None:
+                            continue
+                        if lvalue.atributos.get("name") != nombre:
+                            continue
+                        if asignacion.linea is None:
+                            continue
+                        if asignacion.linea < uso.linea:
+                            asignada = True
+                            break
+
+                    if not asignada:
+                        diagnosticos.append(
+                            self._crear_diagnostico(
+                                nodo=uso,
+                                severidad="warning",
+                                mensaje=(
+                                    f"analizador semantico AST: '{nombre}' "
+                                    f"puede usarse sin haber sido inicializada"
+                                ),
+                                tipo_error="uninitialized_variable",
+                                simbolo=nombre,
+                            )
+                        )
+                        break  
 
         return diagnosticos
 
