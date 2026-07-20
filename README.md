@@ -122,7 +122,7 @@ El sistema clasifica actualmente:
 - `redeclaration`: identificador declarado mas de una vez.
 - `expected_token`: token esperado, incluido el punto y coma.
 - `type_mismatch`: tipos incompatibles.
-- `wrong_arguments`: cantidad incorrecta de argumentos.
+- `wrong_arguments`: cantidad o tipo incorrecto de argumentos.
 - `return_error`: retorno incompatible o declaracion incorrecta de `main`.
 - `unused_variable`: variable o parametro no utilizado.
 - `division_by_zero`: division por cero.
@@ -199,9 +199,19 @@ el AST del programa C.
 
 Antes de analizar:
 
-- reemplaza comentarios por espacios
-- reemplaza directivas del preprocesador por espacios
-- conserva lineas y columnas originales
+- ejecuta el preprocesador de GCC en modo C con `-E`
+- expande macros de objeto y de funcion
+- resuelve directivas condicionales e inclusiones locales
+- bloquea las cabeceras reales del sistema con `-nostdinc`
+- utiliza cabeceras controladas para `stddef.h`, `stdbool.h`, `stdint.h`,
+  `stdio.h`, `stdlib.h`, `string.h` y `math.h`
+- conserva las coordenadas del archivo principal mediante las marcas de linea
+  generadas por el preprocesador
+
+Las cabeceras controladas contienen solo los tipos, macros y prototipos
+necesarios para construir el AST; no incluyen implementaciones ni ejecutan el
+programa. Si GCC no esta disponible, se mantiene como respaldo la limpieza
+anterior de comentarios y directivas.
 
 Cada nodo del AST almacena:
 
@@ -237,6 +247,9 @@ Registra:
 - ubicaciones de cada uso
 - cantidad de usos
 - firma de funciones: lista de tipos de parametros para validar llamadas
+- distincion entre prototipos no especificados, parametros `(void)` y
+  funciones variadicas
+- firmas obtenidas desde definiciones, prototipos y cabeceras incluidas
 
 La resolucion de un identificador comienza en el ambito actual y continua
 hacia sus padres. Esto permite manejar correctamente el sombreado de variables.
@@ -267,7 +280,14 @@ depender exclusivamente de GCC:
 - incompatibilidad de tipos en asignaciones e inicializaciones
 - incompatibilidad entre el tipo declarado de retorno y el valor retornado
 - cantidad incorrecta de argumentos en llamadas a funciones
+- tipo incompatible de cada argumento respecto a su parametro
+- alias `typedef` resueltos antes de comparar tipos de argumentos
 - variables locales usadas antes de recibir un valor
+
+La inferencia de argumentos contempla literales, identificadores, casts,
+punteros, arreglos, operaciones binarias, expresiones ternarias y tipos de
+retorno de llamadas. En funciones variadicas valida los parametros fijos y
+permite los argumentos adicionales.
 
 La evaluacion de constantes soporta numeros, operadores unarios, sumas,
 restas, multiplicaciones, divisiones, modulo y conversiones simples.
@@ -284,6 +304,10 @@ mostrar resultados, `src/analyzer.py` normaliza rutas y elimina duplicados por:
 - categoria
 - linea
 - simbolo
+
+Para argumentos incompatibles tambien reconoce como equivalentes las
+categorias relacionadas de GCC (`type_mismatch`, `pointer_error` y
+`dangerous_conversion`) y la regla semantica `wrong_arguments`.
 
 Cuando GCC ya tiene el diagnostico equivalente, se conserva el mensaje de GCC
 y no se agrega una segunda tarjeta semantica.
@@ -365,7 +389,8 @@ COMPILADOR/
 |   |-- semantic.py            # Coordinador y respaldo textual
 |   |-- semantic_ast.py        # Reglas semanticas sobre el AST
 |   |-- symbol_table.py        # Tabla de simbolos, ambitos y firmas
-|   `-- token.py               # Tipos de token
+|   |-- token.py               # Tipos de token
+|   `-- fake_libc_include/     # Cabeceras minimas para pycparser
 |-- templates/
 |   `-- index.html             # Vista principal de la interfaz
 |-- static/
@@ -596,6 +621,8 @@ Estructura resumida:
 | `semantico_tipos_asignacion.c` | Tipos incompatibles en asignacion |
 | `semantico_retorno_incompatible.c` | Tipo de retorno incompatible |
 | `semantico_variable_no_inicializada.c` | Variable usada sin inicializar |
+| `semantico_argumento_tipo_incorrecto.c` | Tipo individual de argumento incompatible |
+| `semantico_preprocesador_controlado.c` | Macros y tipos de cabeceras controladas |
 
 Ejecutar cualquier ejemplo:
 
@@ -614,7 +641,7 @@ python -m pytest -q
 Ultima verificacion del estado documentado:
 
 ```text
-221 passed
+234 passed
 ```
 
 La cobertura funcional incluye:
@@ -625,9 +652,11 @@ La cobertura funcional incluye:
 - agrupacion de notas
 - parser y arboles de diagnosticos
 - AST del codigo C
-- limpieza de comentarios y directivas
+- preprocesamiento de macros, cabeceras locales y cabeceras controladas
 - tabla de simbolos y resolucion por ambitos
-- firmas de funciones y validacion de cantidad de argumentos
+- firmas normales, `(void)` y variadicas
+- validacion de cantidad y tipos individuales de argumentos
+- resolucion de alias `typedef` en llamadas
 - sombreado y redeclaraciones
 - usos no resueltos
 - reglas semanticas AST y respaldo textual
@@ -686,16 +715,15 @@ diagnostico GCC
 - Solo analiza codigo C.
 - Requiere GCC instalado localmente.
 - La clasificacion depende de patrones de mensajes de GCC en ingles.
-- El analisis de tipos es parcial: cubre asignaciones, inicializaciones y
-  retornos simples, pero no expresiones aritmeticas complejas ni llamadas
-  anidadas.
+- El analisis de tipos es parcial: no cubre completamente miembros de
+  estructuras, punteros a funciones ni todas las promociones de tipos de C.
 - El analisis de flujo de control cubre casos basicos, no todos los caminos de
   `switch`, ciclos, `goto` o construcciones complejas.
-- La validacion de argumentos comprueba cantidad pero no tipos individuales.
-- `pycparser` no ejecuta el preprocesador real; las directivas se reemplazan
-  para construir el AST.
-- Macros y tipos definidos exclusivamente en cabeceras pueden impedir un AST
-  completo o requerir soporte adicional.
+- El preprocesamiento del AST reconoce las cabeceras controladas incluidas en
+  el proyecto y cabeceras locales. Otras cabeceras del sistema requieren un
+  stub adicional.
+- Macros dependientes de extensiones especificas del compilador pueden producir
+  construcciones que `pycparser` no comprenda.
 - El respaldo por expresiones regulares es menos preciso que el analisis AST.
 - La interfaz Flask incluida es un servidor de desarrollo local.
 - La interfaz web aun no descarga JSON directamente.
@@ -705,11 +733,10 @@ diagnostico GCC
 
 ## Pendientes recomendados
 
-1. Validar tipos individuales de argumentos en llamadas a funciones, no solo
-   la cantidad.
-2. Integrar un preprocesamiento controlado para macros y cabeceras complejas.
-3. Permitir descargar el reporte JSON desde la interfaz web.
-4. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
+1. Permitir descargar el reporte JSON desde la interfaz web.
+2. Ampliar las cabeceras controladas y la inferencia para miembros de
+   estructuras y punteros a funciones.
+3. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
    de correccion y cobertura de categorias.
-5. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
+4. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
    deja de ser exclusivamente local.

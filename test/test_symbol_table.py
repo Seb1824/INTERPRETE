@@ -291,7 +291,32 @@ def test_semantico_registra_funcion_de_cabecera_como_externa():
     )
     assert printf.clase == "funcion_externa"
     assert printf.cantidad_usos == 1
+    assert printf.firma_parametros_definida is True
+    assert printf.tipos_parametros == ["char *"]
+    assert printf.es_variadica is True
     assert not any(
         uso.nombre == "printf"
         for uso in tabla.usos_no_resueltos
     )
+
+
+def test_tabla_registra_firma_void_y_prototipo_local(tmp_path):
+    fuente = tmp_path / "firmas.c"
+    fuente.write_text(
+        "void limpiar(void);\n"
+        "int sumar(int izquierda, int derecha);\n"
+        "int main(void) { return sumar(1, 2); }\n",
+        encoding="utf-8",
+    )
+
+    tabla = construir_tabla_simbolos(construir_ast_codigo(str(fuente)))
+    limpiar = tabla.ambito_global.buscar_local("limpiar")
+    sumar = tabla.ambito_global.buscar_local("sumar")
+
+    assert limpiar is not None
+    assert limpiar.firma_parametros_definida is True
+    assert limpiar.tipos_parametros == []
+    assert limpiar.es_variadica is False
+    assert sumar is not None
+    assert sumar.tipos_parametros == ["int", "int"]
+    assert "parametros=(int, int)" in "\n".join(tabla.render())

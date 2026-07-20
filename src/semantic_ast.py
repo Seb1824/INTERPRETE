@@ -4,7 +4,7 @@ import re
 
 from src.ast_builder import SourceASTNode, limpiar_comentarios_codigo
 from src.parser import DiagnosticEntry
-from src.symbol_table import Symbol, construir_tabla_simbolos
+from src.symbol_table import Scope, Symbol, SymbolTable, construir_tabla_simbolos
 
 
 _PATRON_INCLUDE_STDIO = re.compile(r'#include\s*[<"]stdio\.h[>"]')
@@ -37,18 +37,7 @@ class ASTSemanticAnalyzer:
         self.tiene_stdio = bool(
             _PATRON_INCLUDE_STDIO.search(self.codigo_sin_comentarios)
         )
-        externos = set()
-        if self.tiene_stdio:
-            externos = {
-                nombre
-                for llamada in _buscar_nodos(ast_codigo, "FuncCall")
-                if (nombre := _nombre_funcion_llamada(llamada))
-                in _FUNCIONES_STDIO
-            }
-        self.tabla_simbolos = construir_tabla_simbolos(
-            ast_codigo,
-            simbolos_externos=externos,
-        )
+        self.tabla_simbolos = construir_tabla_simbolos(ast_codigo)
 
     def analizar(self) -> list[DiagnosticEntry]:
         diagnosticos = []
@@ -259,7 +248,11 @@ class ASTSemanticAnalyzer:
 
             tipo_decl = _hijo_por_rol(decl, "type")
             tipo_izquierdo = _describir_tipo_nodo(tipo_decl)
-            tipo_derecho = _inferir_tipo_expresion(init, self.tabla_simbolos)
+            tipo_derecho = _inferir_tipo_expresion(
+                init,
+                self.tabla_simbolos,
+                self._ambito_en_linea(decl.linea or 1),
+            )
 
             if tipo_izquierdo is None or tipo_derecho is None:
                 continue
@@ -306,7 +299,11 @@ class ASTSemanticAnalyzer:
                 continue
 
             tipo_izquierdo = simbolo.tipo_dato
-            tipo_derecho = _inferir_tipo_expresion(rvalue, self.tabla_simbolos)
+            tipo_derecho = _inferir_tipo_expresion(
+                rvalue,
+                self.tabla_simbolos,
+                self._ambito_en_linea(asignacion.linea or 1),
+            )
 
             if tipo_derecho is None:
                 continue
@@ -348,29 +345,84 @@ class ASTSemanticAnalyzer:
             )
             if simbolo is None or simbolo.clase not in {"funcion", "funcion_externa"}:
                 continue
-            if not simbolo.tipos_parametros:
+            if not simbolo.firma_parametros_definida:
                 continue
 
             args = _hijo_por_rol(llamada, "args")
-            cantidad_real = len(args.hijos) if args is not None else 0
+            argumentos = args.hijos if args is not None else []
+            cantidad_real = len(argumentos)
             cantidad_esperada = len(simbolo.tipos_parametros)
 
-            if cantidad_real == cantidad_esperada:
+            cantidad_invalida = (
+                cantidad_real < cantidad_esperada
+                if simbolo.es_variadica
+                else cantidad_real != cantidad_esperada
+            )
+            if cantidad_invalida:
+                diagnosticos.append(
+                    self._crear_diagnostico(
+                        nodo=llamada,
+                        severidad="error",
+                        mensaje=(
+                            f"analizador semantico AST: la funcion '{nombre}' "
+                            f"espera {cantidad_esperada} argumento(s) "
+                            f"pero se le paso {cantidad_real}"
+                        ),
+                        tipo_error="wrong_arguments",
+                        simbolo=nombre,
+                    )
+                )
                 continue
 
-            diagnosticos.append(
-                self._crear_diagnostico(
-                    nodo=llamada,
-                    severidad="error",
-                    mensaje=(
-                        f"analizador semantico AST: la funcion '{nombre}' "
-                        f"espera {cantidad_esperada} argumento(s) "
-                        f"pero se le paso {cantidad_real}"
-                    ),
-                    tipo_error="wrong_arguments",
-                    simbolo=nombre,
+            ambito = self._ambito_en_linea(llamada.linea or 1)
+            for posicion, (argumento, tipo_esperado) in enumerate(
+                zip(argumentos, simbolo.tipos_parametros),
+                start=1,
+            ):
+                tipo_real = _inferir_tipo_expresion(
+                    argumento,
+                    self.tabla_simbolos,
+                    ambito,
                 )
-            )
+                if tipo_real is None:
+                    continue
+                tipo_esperado_resuelto = _resolver_alias_tipo(
+                    tipo_esperado,
+                    self.tabla_simbolos,
+                )
+                tipo_real_resuelto = _resolver_alias_tipo(
+                    tipo_real,
+                    self.tabla_simbolos,
+                )
+                if _tipos_compatibles(
+                    tipo_esperado_resuelto,
+                    tipo_real_resuelto,
+                ):
+                    continue
+
+                descripcion_esperada = _describir_tipo_resuelto(
+                    tipo_esperado,
+                    tipo_esperado_resuelto,
+                )
+                descripcion_real = _describir_tipo_resuelto(
+                    tipo_real,
+                    tipo_real_resuelto,
+                )
+
+                diagnosticos.append(
+                    self._crear_diagnostico(
+                        nodo=argumento,
+                        severidad="warning",
+                        mensaje=(
+                            f"analizador semantico AST: el argumento "
+                            f"{posicion} de '{nombre}' espera "
+                            f"'{descripcion_esperada}' pero recibio "
+                            f"'{descripcion_real}'"
+                        ),
+                        tipo_error="wrong_arguments",
+                        simbolo=nombre,
+                    )
+                )
 
         return diagnosticos
     
@@ -524,7 +576,11 @@ class ASTSemanticAnalyzer:
             if expr is None:
                 continue
 
-            tipo_expresion = _inferir_tipo_expresion(expr, self.tabla_simbolos)
+            tipo_expresion = _inferir_tipo_expresion(
+                expr,
+                self.tabla_simbolos,
+                self._ambito_en_linea(nodo_return.linea or 1),
+            )
             if tipo_expresion is None:
                 continue
             if _tipos_compatibles(tipo_retorno, tipo_expresion):
@@ -761,7 +817,8 @@ def _describir_tipo_nodo(nodo: SourceASTNode | None) -> str | None:
 
 def _inferir_tipo_expresion(
     nodo: SourceASTNode,
-    tabla: "SymbolTable",
+    tabla: SymbolTable,
+    ambito: Scope | None = None,
 ) -> str | None:
     """Infiere el tipo de una expresion desde el AST."""
     if nodo.tipo == "Constant":
@@ -769,18 +826,28 @@ def _inferir_tipo_expresion(
         valor = nodo.atributos.get("value", "")
         if tipo == "string":
             return "char *"
+        if tipo == "float" or valor.endswith(("f", "F")):
+            return "float"
+        if tipo in {"double", "long double"}:
+            return tipo
+        if tipo == "char":
+            return "int"
+        if tipo:
+            return tipo
         if "." in valor or "e" in valor.lower():
             return "double"
-        if valor.endswith(("f", "F")):
-            return "float"
         return "int"
 
     if nodo.tipo == "ID":
         nombre = nodo.atributos.get("name")
         if not nombre:
             return None
-        for ambito in tabla.todos_los_ambitos():
-            simbolo = ambito.buscar_local(nombre)
+        if ambito is not None:
+            simbolo = tabla.resolver(nombre, ambito)
+            if simbolo is not None:
+                return simbolo.tipo_dato
+        for ambito_actual in tabla.todos_los_ambitos():
+            simbolo = ambito_actual.buscar_local(nombre)
             if simbolo is not None:
                 return simbolo.tipo_dato
         return None
@@ -793,14 +860,110 @@ def _inferir_tipo_expresion(
         op = nodo.atributos.get("op", "")
         if op == "&":
             expr = _hijo_por_rol(nodo, "expr")
-            base = _inferir_tipo_expresion(expr, tabla) if expr else None
+            base = (
+                _inferir_tipo_expresion(expr, tabla, ambito)
+                if expr
+                else None
+            )
             return f"{base} *" if base else None
         if op == "*":
             expr = _hijo_por_rol(nodo, "expr")
-            base = _inferir_tipo_expresion(expr, tabla) if expr else None
+            base = (
+                _inferir_tipo_expresion(expr, tabla, ambito)
+                if expr
+                else None
+            )
             return base.replace(" *", "", 1) if base and " *" in base else None
+        if op == "sizeof":
+            return "unsigned long"
+        if op == "!":
+            return "int"
+        if op in {"+", "-", "~", "p++", "p--", "++", "--"}:
+            expr = _hijo_por_rol(nodo, "expr")
+            return (
+                _inferir_tipo_expresion(expr, tabla, ambito)
+                if expr
+                else None
+            )
+
+    if nodo.tipo == "BinaryOp":
+        operador = nodo.atributos.get("op", "")
+        if operador in {"==", "!=", "<", "<=", ">", ">=", "&&", "||"}:
+            return "int"
+
+        izquierda = _hijo_por_rol(nodo, "left")
+        derecha = _hijo_por_rol(nodo, "right")
+        tipo_izquierdo = (
+            _inferir_tipo_expresion(izquierda, tabla, ambito)
+            if izquierda
+            else None
+        )
+        tipo_derecho = (
+            _inferir_tipo_expresion(derecha, tabla, ambito)
+            if derecha
+            else None
+        )
+        return _tipo_resultado_operacion(tipo_izquierdo, tipo_derecho)
+
+    if nodo.tipo == "FuncCall":
+        nombre = _nombre_funcion_llamada(nodo)
+        if not nombre:
+            return None
+        simbolo = tabla.resolver(nombre, ambito or tabla.ambito_global)
+        if simbolo is None or "->" not in simbolo.tipo_dato:
+            return None
+        return simbolo.tipo_dato.split("->", 1)[1].strip()
+
+    if nodo.tipo == "ArrayRef":
+        nombre = _hijo_por_rol(nodo, "name")
+        tipo_arreglo = (
+            _inferir_tipo_expresion(nombre, tabla, ambito)
+            if nombre
+            else None
+        )
+        if tipo_arreglo and tipo_arreglo.endswith("[]"):
+            return tipo_arreglo[:-2].rstrip()
+        if tipo_arreglo and "*" in tipo_arreglo:
+            return tipo_arreglo.rsplit("*", 1)[0].rstrip()
+
+    if nodo.tipo == "TernaryOp":
+        verdadero = _hijo_por_rol(nodo, "iftrue")
+        falso = _hijo_por_rol(nodo, "iffalse")
+        tipo_verdadero = (
+            _inferir_tipo_expresion(verdadero, tabla, ambito)
+            if verdadero
+            else None
+        )
+        tipo_falso = (
+            _inferir_tipo_expresion(falso, tabla, ambito)
+            if falso
+            else None
+        )
+        return _tipo_resultado_operacion(tipo_verdadero, tipo_falso)
 
     return None
+
+
+def _tipo_resultado_operacion(
+    tipo_izquierdo: str | None,
+    tipo_derecho: str | None,
+) -> str | None:
+    if tipo_izquierdo is None:
+        return tipo_derecho
+    if tipo_derecho is None:
+        return tipo_izquierdo
+
+    tipos = {
+        _normalizar_tipo(tipo_izquierdo),
+        _normalizar_tipo(tipo_derecho),
+    }
+    if "long double" in tipos:
+        return "long double"
+    if "double" in tipos:
+        return "double"
+    if "float" in tipos:
+        return "float"
+    return tipo_izquierdo
 
 
 def _tipos_compatibles(tipo_izq: str, tipo_der: str) -> bool:
@@ -808,18 +971,19 @@ def _tipos_compatibles(tipo_izq: str, tipo_der: str) -> bool:
     Devuelve True si la asignacion es aceptable sin diagnostico.
     Solo reporta incompatibilidades claras y evita falsos positivos.
     """
-    if tipo_izq == tipo_der:
-        return True
-
-    izq = tipo_izq.strip().lower()
-    der = tipo_der.strip().lower()
+    izq = _normalizar_tipo(tipo_izq)
+    der = _normalizar_tipo(tipo_der)
 
     if izq == der:
         return True
 
-    enteros = {"int", "short", "long", "unsigned", "char",
+    enteros = {"int", "short", "long", "unsigned", "char", "_bool",
                "unsigned int", "unsigned long", "unsigned short",
                "unsigned char", "long long", "signed"}
+    if _es_alias_entero(izq):
+        enteros.add(izq)
+    if _es_alias_entero(der):
+        enteros.add(der)
     if izq in enteros and der in enteros:
         return True
 
@@ -832,16 +996,67 @@ def _tipos_compatibles(tipo_izq: str, tipo_der: str) -> bool:
     if izq in flotantes and der in enteros:
         return True
 
-    if "null" in der or der == "0":
-        return True
+    puntero_izquierdo = "*" in izq
+    puntero_derecho = "*" in der
+    if puntero_izquierdo or puntero_derecho:
+        if puntero_izquierdo != puntero_derecho:
+            return False
+        base_izquierda = izq.rsplit("*", 1)[0].strip()
+        base_derecha = der.rsplit("*", 1)[0].strip()
+        return (
+            base_izquierda == base_derecha
+            or base_izquierda == "void"
+            or base_derecha == "void"
+        )
 
-    if izq == "char *" and der == "char *":
-        return True
-
-    if izq in enteros and der == "char *":
+    if izq.startswith(("struct ", "union ", "enum ")):
         return False
-
-    if "*" in izq and der in enteros:
+    if der.startswith(("struct ", "union ", "enum ")):
         return False
 
     return True
+
+
+def _normalizar_tipo(tipo: str) -> str:
+    normalizado = tipo.strip().lower()
+    normalizado = re.sub(r"\b(?:const|volatile|restrict)\b", "", normalizado)
+    normalizado = re.sub(r"\s+", " ", normalizado).strip()
+    normalizado = re.sub(r"\s*\*\s*", " *", normalizado)
+    if normalizado.endswith("[]"):
+        normalizado = f"{normalizado[:-2].rstrip()} *"
+    return normalizado
+
+
+def _es_alias_entero(tipo: str) -> bool:
+    return tipo in {"size_t", "ptrdiff_t", "intptr_t", "uintptr_t"} or bool(
+        re.fullmatch(r"u?int(?:8|16|32|64)_t", tipo)
+    )
+
+
+def _resolver_alias_tipo(tipo: str, tabla: SymbolTable) -> str:
+    actual = tipo.strip()
+    for _ in range(8):
+        coincidencia = re.fullmatch(
+            r"(?P<base>[A-Za-z_][A-Za-z0-9_]*)"
+            r"(?P<sufijo>(?:\s*\*)*|\[\])",
+            actual,
+        )
+        if not coincidencia:
+            return actual
+
+        simbolo = tabla.ambito_global.buscar_local(coincidencia.group("base"))
+        if simbolo is None or simbolo.clase != "typedef":
+            return actual
+
+        sufijo = coincidencia.group("sufijo")
+        if sufijo == "[]":
+            sufijo = " *"
+        actual = f"{simbolo.tipo_dato}{sufijo}"
+
+    return actual
+
+
+def _describir_tipo_resuelto(original: str, resuelto: str) -> str:
+    if _normalizar_tipo(original) == _normalizar_tipo(resuelto):
+        return original
+    return f"{original}, equivalente a {resuelto}"

@@ -301,6 +301,144 @@ def test_semantic_ast_detecta_divisor_constante_calculado(tmp_path):
     assert division.simbolo == "/"
 
 
+def test_semantic_ast_detecta_tipo_incorrecto_en_argumento(tmp_path):
+    fuente = tmp_path / "argumento_tipo.c"
+    fuente.write_text(
+        "int longitud(const char *texto) { return texto[0]; }\n"
+        "int main(void) { return longitud(42); }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.linea == 2
+    assert argumento.simbolo == "longitud"
+    assert "argumento 1" in argumento.mensaje_crudo
+    assert "char *" in argumento.mensaje_crudo
+    assert "int" in argumento.mensaje_crudo
+
+
+def test_semantic_ast_acepta_cadena_para_parametro_const_char(tmp_path):
+    fuente = tmp_path / "argumento_compatible.c"
+    fuente.write_text(
+        "int longitud(const char *texto) { return texto[0]; }\n"
+        'int main(void) { return longitud("hola"); }\n',
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_ast_valida_cantidad_en_funcion_void(tmp_path):
+    fuente = tmp_path / "funcion_void.c"
+    fuente.write_text(
+        "void limpiar(void) {}\n"
+        "int main(void) { limpiar(1); return 0; }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "limpiar"
+    assert "espera 0" in argumento.mensaje_crudo
+
+
+def test_semantic_ast_acepta_argumentos_extra_en_funcion_variadica(tmp_path):
+    fuente = tmp_path / "variadica.c"
+    fuente.write_text(
+        "#include <stdio.h>\n"
+        "int main(void) {\n"
+        '    printf("%d %s", 7, "dias");\n'
+        "    return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_ast_usa_prototipo_de_cabecera_local(tmp_path):
+    cabecera = tmp_path / "texto.h"
+    cabecera.write_text(
+        "typedef const char *Texto;\n"
+        "int procesar(Texto texto);\n",
+        encoding="utf-8",
+    )
+    fuente = tmp_path / "principal.c"
+    fuente.write_text(
+        '#include "texto.h"\n'
+        "int main(void) { return procesar(10); }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "procesar"
+    assert "argumento 1" in argumento.mensaje_crudo
+    assert "equivalente a char *" in argumento.mensaje_crudo
+
+
+def test_combinar_diagnosticos_evita_duplicar_tipo_de_argumento():
+    gcc = DiagnosticEntry(
+        archivo="programa.c",
+        linea=4,
+        columna=14,
+        severidad="warning",
+        mensaje_crudo="passing argument 1 makes pointer from integer",
+        tipo_error="type_mismatch",
+        simbolo="procesar",
+    )
+    semantico = DiagnosticEntry(
+        archivo="programa.c",
+        linea=4,
+        columna=14,
+        severidad="warning",
+        mensaje_crudo="argumento 1 espera char * pero recibio int",
+        tipo_error="wrong_arguments",
+        simbolo="procesar",
+        origen="semantico",
+    )
+
+    combinados = _combinar_diagnosticos([gcc], [semantico])
+
+    assert combinados == [gcc]
+
+
+def test_semantic_ast_analiza_codigo_con_macros_y_tipos_estandar(tmp_path):
+    fuente = tmp_path / "preprocesado.c"
+    fuente.write_text(
+        "#include <stdbool.h>\n"
+        "#include <stdint.h>\n"
+        "#define DOBLE(valor) ((valor) * 2)\n"
+        "int main(void) {\n"
+        "    bool activo = true;\n"
+        "    int32_t numero = DOBLE(4);\n"
+        "    return activo ? numero - 8 : 1;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    analizador = SemanticAnalyzer(str(fuente))
+
+    diagnosticos = analizador.analizar()
+
+    assert analizador.error_ast is None
+    assert analizador.ast_codigo is not None
+    assert diagnosticos == []
+
+
 def test_semantic_usa_respaldo_textual_si_ast_es_invalido(tmp_path):
     fuente = tmp_path / "ast_invalido.c"
     fuente.write_text(

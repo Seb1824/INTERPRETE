@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,10 @@ class ASTDependencyError(ASTBuildError):
 
 class ASTParseError(ASTBuildError):
     """El codigo fuente no pudo convertirse en un AST completo."""
+
+
+class ASTPreprocessError(ASTBuildError):
+    """El preprocesador no pudo preparar el codigo para construir el AST."""
 
 
 class ASTSourceReadError(ASTBuildError):
@@ -80,7 +86,7 @@ def construir_ast_codigo(ruta_fuente: str) -> SourceASTNode:
             f"No se pudo leer el archivo fuente '{ruta}': {exc}"
         ) from exc
 
-    codigo_preparado = _preparar_codigo_para_parser(codigo)
+    codigo_preparado = _preprocesar_codigo(ruta, codigo)
     parser = c_parser.CParser()
 
     try:
@@ -91,6 +97,58 @@ def construir_ast_codigo(ruta_fuente: str) -> SourceASTNode:
         ) from exc
 
     return _convertir_nodo(raiz_pycparser)
+
+
+def _preprocesar_codigo(ruta: Path, codigo: str) -> str:
+    gcc = shutil.which("gcc")
+    if gcc is None:
+        return _preparar_codigo_para_parser(codigo)
+
+    cabeceras_controladas = Path(__file__).with_name("fake_libc_include")
+    comando = [
+        gcc,
+        "-E",
+        "-x",
+        "c",
+        "-std=c11",
+        "-nostdinc",
+        f"-I{cabeceras_controladas}",
+        f"-I{ruta.parent.resolve()}",
+        "-D__attribute__(x)=",
+        "-D__declspec(x)=",
+        "-D__extension__=",
+        "-D__inline__=inline",
+        "-D__restrict=restrict",
+        str(ruta.resolve()),
+    ]
+
+    try:
+        resultado = subprocess.run(
+            comando,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ASTPreprocessError(
+            f"No se pudo ejecutar el preprocesador de C: {exc}"
+        ) from exc
+
+    if resultado.returncode != 0:
+        detalle = _resumir_error_preprocesador(resultado.stderr)
+        raise ASTPreprocessError(
+            f"No se pudo preprocesar el codigo C: {detalle}"
+        )
+
+    return resultado.stdout
+
+
+def _resumir_error_preprocesador(stderr: str) -> str:
+    lineas = [linea.strip() for linea in stderr.splitlines() if linea.strip()]
+    return lineas[-1] if lineas else "el preprocesador termino con error"
 
 
 def _convertir_nodo(nodo: Any, rol: str | None = None) -> SourceASTNode:

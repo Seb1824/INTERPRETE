@@ -24,6 +24,8 @@ class Symbol:
     linea_declaracion: int
     columna_declaracion: int
     tipos_parametros: list[str] = field(default_factory=list)
+    firma_parametros_definida: bool = False
+    es_variadica: bool = False
     usos: list[SymbolUse] = field(default_factory=list)
 
     @property
@@ -44,6 +46,8 @@ class Symbol:
             "cantidad_usos": self.cantidad_usos,
             "usos": [uso.to_dict() for uso in self.usos],
             "tipos_parametros": self.tipos_parametros,
+            "firma_parametros_definida": self.firma_parametros_definida,
+            "es_variadica": self.es_variadica,
         }
 
 
@@ -300,7 +304,7 @@ class SymbolTableBuilder:
         existente = self.tabla.ambito_global.buscar_local(nombre)
         if (
             existente is None
-            or existente.clase != "funcion"
+            or existente.clase not in {"funcion", "funcion_externa"}
             or nombre in self.funciones_definidas
         ):
             self._declarar_desde_nodo(
@@ -311,10 +315,8 @@ class SymbolTableBuilder:
             
         simbolo_funcion = self.tabla.ambito_global.buscar_local(nombre)
         if simbolo_funcion is not None:
-            simbolo_funcion.tipos_parametros = [
-                _describir_tipo(_hijo_por_rol(param, "type"))
-                for param in _parametros_de_funcion(declaracion)
-            ]
+            simbolo_funcion.clase = "funcion"
+            _actualizar_firma_funcion(simbolo_funcion, declaracion)
 
         self.funciones_definidas.add(nombre)
         ambito_funcion = self.tabla.crear_ambito(
@@ -364,8 +366,18 @@ class SymbolTableBuilder:
             if _es_declaracion_funcion(nodo):
                 nombre = nodo.atributos.get("name")
                 existente = ambito.buscar_local(nombre) if nombre else None
-                if existente is None or existente.clase != "funcion":
-                    self._declarar_desde_nodo(nodo, ambito, clase="funcion")
+                if existente is None or existente.clase not in {
+                    "funcion",
+                    "funcion_externa",
+                }:
+                    self._declarar_desde_nodo(
+                        nodo,
+                        ambito,
+                        clase="funcion_externa",
+                    )
+                simbolo_funcion = ambito.buscar_local(nombre) if nombre else None
+                if simbolo_funcion is not None:
+                    _actualizar_firma_funcion(simbolo_funcion, nodo)
                 return
 
             clase = "variable"
@@ -458,6 +470,69 @@ def _parametros_de_funcion(declaracion: SourceASTNode) -> list[SourceASTNode]:
     return []
 
 
+def _actualizar_firma_funcion(
+    simbolo: Symbol,
+    declaracion: SourceASTNode,
+) -> None:
+    tipos, firma_definida, es_variadica = _firma_de_funcion(declaracion)
+    if not firma_definida and simbolo.firma_parametros_definida:
+        return
+
+    simbolo.tipos_parametros = tipos
+    simbolo.firma_parametros_definida = firma_definida
+    simbolo.es_variadica = es_variadica
+
+
+def _firma_de_funcion(
+    declaracion: SourceASTNode,
+) -> tuple[list[str], bool, bool]:
+    declaracion_funcion = next(
+        (
+            nodo
+            for nodo in _recorrer_nodos(declaracion)
+            if nodo.tipo == "FuncDecl"
+        ),
+        None,
+    )
+    if declaracion_funcion is None:
+        return [], False, False
+
+    argumentos = _hijo_por_rol(declaracion_funcion, "args")
+    if argumentos is None:
+        return [], False, False
+
+    parametros = [
+        hijo
+        for hijo in argumentos.hijos
+        if hijo.tipo == "Decl"
+    ]
+    es_variadica = any(
+        hijo.tipo == "EllipsisParam"
+        for hijo in argumentos.hijos
+    )
+
+    if len(parametros) == 1 and not parametros[0].atributos.get("name"):
+        tipo_unico = _describir_tipo(
+            _hijo_por_rol(parametros[0], "type")
+        )
+        if tipo_unico == "void":
+            return [], True, es_variadica
+
+    tipos = [
+        _normalizar_tipo_parametro(
+            _describir_tipo(_hijo_por_rol(parametro, "type"))
+        )
+        for parametro in parametros
+    ]
+    return tipos, True, es_variadica
+
+
+def _normalizar_tipo_parametro(tipo: str) -> str:
+    if tipo.endswith("[]"):
+        return f"{tipo[:-2].rstrip()} *"
+    return tipo
+
+
 def _es_declaracion_funcion(declaracion: SourceASTNode) -> bool:
     tipo = _hijo_por_rol(declaracion, "type")
     return tipo is not None and tipo.tipo == "FuncDecl"
@@ -528,10 +603,19 @@ def _renderizar_ambito(
     )
 
     for simbolo in ambito.simbolos:
+        firma = ""
+        if simbolo.clase in {"funcion", "funcion_externa"}:
+            if simbolo.firma_parametros_definida:
+                parametros = list(simbolo.tipos_parametros)
+                if simbolo.es_variadica:
+                    parametros.append("...")
+                firma = f", parametros=({', '.join(parametros) or 'void'})"
+            else:
+                firma = ", parametros=no especificados"
         lineas.append(
             f"{sangria}  - {simbolo.nombre}: {simbolo.tipo_dato} "
             f"({simbolo.clase}, usos={simbolo.cantidad_usos}, "
-            f"linea={simbolo.linea_declaracion})"
+            f"linea={simbolo.linea_declaracion}{firma})"
         )
 
     for hijo in ambito.hijos:

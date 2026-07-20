@@ -81,29 +81,49 @@ def combinar_diagnosticos(
 
     for semantico in diagnosticos_semanticos:
         duplicado = any(
-            existente.tipo_error == semantico.tipo_error
-            and _misma_ruta(existente.archivo, semantico.archivo)
-            and (
-                (
-                    existente.linea == semantico.linea
-                    and (
-                        not existente.simbolo
-                        or not semantico.simbolo
-                        or existente.simbolo == semantico.simbolo
-                    )
-                )
-                or (
-                    semantico.tipo_error in {"missing_return", "return_error"}
-                    and semantico.simbolo
-                    and existente.simbolo == semantico.simbolo
-                )
-            )
+            _diagnosticos_equivalentes(existente, semantico)
             for existente in gcc_limpios
         )
         if not duplicado:
             combinados.append(semantico)
 
     return combinados
+
+
+def _diagnosticos_equivalentes(
+    diagnostico_gcc: DiagnosticEntry,
+    diagnostico_semantico: DiagnosticEntry,
+) -> bool:
+    if not _misma_ruta(diagnostico_gcc.archivo, diagnostico_semantico.archivo):
+        return False
+
+    mismo_simbolo = (
+        not diagnostico_gcc.simbolo
+        or not diagnostico_semantico.simbolo
+        or diagnostico_gcc.simbolo == diagnostico_semantico.simbolo
+    )
+    misma_linea = diagnostico_gcc.linea == diagnostico_semantico.linea
+
+    if diagnostico_gcc.tipo_error == diagnostico_semantico.tipo_error:
+        return (misma_linea and mismo_simbolo) or (
+            diagnostico_semantico.tipo_error
+            in {"missing_return", "return_error"}
+            and diagnostico_semantico.simbolo
+            and diagnostico_gcc.simbolo == diagnostico_semantico.simbolo
+        )
+
+    categorias_argumento_gcc = {
+        "dangerous_conversion",
+        "pointer_error",
+        "type_mismatch",
+        "wrong_arguments",
+    }
+    return (
+        diagnostico_semantico.tipo_error == "wrong_arguments"
+        and diagnostico_gcc.tipo_error in categorias_argumento_gcc
+        and misma_linea
+        and mismo_simbolo
+    )
 
 
 def _misma_ruta(primera: str, segunda: str) -> bool:

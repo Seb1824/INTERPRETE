@@ -18,3 +18,28 @@ def test_analizador_devuelve_pipeline_estructurado():
     ) == 1
     assert resultado.ast_codigo is not None
     assert resultado.tabla_simbolos is not None
+
+
+def test_analizador_deduplica_tipo_incorrecto_de_argumento():
+    resultado = analizar_archivo(
+        "examples/semantico_argumento_tipo_incorrecto.c"
+    )
+
+    assert any(
+        diagnostico.tipo_error == "wrong_arguments"
+        and diagnostico.simbolo == "longitud"
+        for diagnostico in resultado.diagnosticos_semanticos
+    )
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        and diagnostico.simbolo == "longitud"
+        for diagnostico in resultado.diagnosticos
+    )
+    assert len(
+        [
+            diagnostico
+            for diagnostico in resultado.diagnosticos
+            if diagnostico.tipo_error == "type_mismatch"
+            and diagnostico.simbolo == "longitud"
+        ]
+    ) == 1
