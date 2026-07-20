@@ -88,9 +88,40 @@
                 </div>
 
                 {% if resultado.diagnosticos %}
+                    <section
+                        id="speech-controls"
+                        class="speech-controls"
+                        aria-labelledby="speech-title"
+                    >
+                        <div class="speech-copy">
+                            <h3 id="speech-title">Lectura por voz</h3>
+                            <p id="speech-status" role="status" aria-live="polite">
+                                Lista para leer los diagnosticos.
+                            </p>
+                        </div>
+                        <div class="speech-actions">
+                            <button id="speak-all" class="speech-primary" type="button" aria-pressed="false">
+                                Escuchar todos
+                            </button>
+                            <button id="pause-speech" type="button" disabled>Pausar</button>
+                            <button id="stop-speech" type="button" disabled>Detener</button>
+                            <label class="speech-rate" for="speech-rate">
+                                Velocidad
+                                <select id="speech-rate">
+                                    <option value="0.75">Lenta</option>
+                                    <option value="1" selected>Normal</option>
+                                    <option value="1.25">Rapida</option>
+                                </select>
+                            </label>
+                        </div>
+                    </section>
+
                     <div class="diagnostic-list" aria-label="Diagnosticos encontrados">
                         {% for diagnostico in resultado.diagnosticos %}
-                            <article class="diagnostic diagnostic-{{ diagnostico.severidad }}">
+                            <article
+                                class="diagnostic diagnostic-{{ diagnostico.severidad }}"
+                                data-speech-item
+                            >
                                 <header class="diagnostic-header">
                                     <span class="severity severity-{{ diagnostico.severidad }}">{{ diagnostico.etiqueta }}</span>
                                     <div>
@@ -99,6 +130,15 @@
                                             {{ diagnostico.archivo }} · linea {{ diagnostico.linea }}, columna {{ diagnostico.columna }}
                                         </p>
                                     </div>
+                                    <button
+                                        class="speak-diagnostic"
+                                        type="button"
+                                        data-speak-diagnostic
+                                        aria-label="Escuchar diagnostico: {{ diagnostico.titulo }}"
+                                        aria-pressed="false"
+                                    >
+                                        Escuchar diagnostico
+                                    </button>
                                 </header>
 
                                 {% if diagnostico.linea_codigo %}

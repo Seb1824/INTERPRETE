@@ -51,6 +51,23 @@ def test_analiza_codigo_pegado_con_error_sin_duplicar_gcc(cliente_web):
     assert "Usos no resueltos" in contenido
 
 
+def test_muestra_controles_de_voz_para_los_diagnosticos(cliente_web):
+    respuesta = cliente_web.post(
+        "/analizar",
+        data={"codigo": "int main() {\n    return total;\n}\n"},
+    )
+    contenido = respuesta.get_data(as_text=True)
+
+    assert respuesta.status_code == 200
+    assert 'id="speech-controls"' in contenido
+    assert 'id="speak-all"' in contenido
+    assert 'id="pause-speech"' in contenido
+    assert 'id="stop-speech"' in contenido
+    assert 'id="speech-rate"' in contenido
+    assert "data-speech-item" in contenido
+    assert "data-speak-diagnostic" in contenido
+
+
 def test_analiza_archivo_c_cargado(cliente_web):
     respuesta = cliente_web.post(
         "/analizar",

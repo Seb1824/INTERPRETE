@@ -325,6 +325,9 @@ La aplicacion Flask esta definida en `web_app.py` y ofrece:
 - resumen de errores, advertencias y cobertura
 - mensajes mejorados con contexto de codigo
 - notas de GCC asociadas
+- sintesis de voz individual o para todos los diagnosticos
+- controles para pausar, continuar, detener y ajustar la velocidad de lectura
+- pronunciacion adaptada de simbolos de C, como `#` leido como "numeral"
 - seccion desplegable con AST y tabla de simbolos
 - diseno responsive para escritorio y movil
 
@@ -338,9 +341,11 @@ La interfaz incluye fundamentos de accesibilidad:
 - regiones `role="status"` y `role="alert"`
 - indicadores textuales ademas del color
 - soporte para preferencia de movimiento reducido
+- lectura iniciada solo por accion del usuario
+- seleccion automatica de una voz disponible en espanol
 
-La sintesis de voz todavia no esta implementada. Esta prevista como una mejora
-posterior para complementar lectores de pantalla.
+La sintesis utiliza la API de voz del navegador. El texto se procesa en el
+equipo del usuario y no se envia desde la aplicacion a un servicio de voz.
 
 ## Estructura del repositorio
 
@@ -609,7 +614,7 @@ python -m pytest -q
 Ultima verificacion del estado documentado:
 
 ```text
-220 passed
+221 passed
 ```
 
 La cobertura funcional incluye:
@@ -637,6 +642,7 @@ La cobertura funcional incluye:
 - API estructurada `analizar_archivo()`
 - rutas web, codigo pegado y carga de archivos
 - validaciones de la interfaz Flask
+- controles web de sintesis de voz
 
 ## Relacion con las etapas de un compilador
 
@@ -693,18 +699,17 @@ diagnostico GCC
 - El respaldo por expresiones regulares es menos preciso que el analisis AST.
 - La interfaz Flask incluida es un servidor de desarrollo local.
 - La interfaz web aun no descarga JSON directamente.
-- La lectura de errores por voz aun no esta implementada.
+- La sintesis de voz depende de la API, las voces y el idioma disponibles en el
+  navegador y el sistema operativo.
 - El sistema propone sugerencias, pero no modifica automaticamente el codigo.
 
 ## Pendientes recomendados
 
-1. Agregar sintesis de voz con controles para escuchar, pausar y detener cada
-   diagnostico.
-2. Validar tipos individuales de argumentos en llamadas a funciones, no solo
+1. Validar tipos individuales de argumentos en llamadas a funciones, no solo
    la cantidad.
-3. Integrar un preprocesamiento controlado para macros y cabeceras complejas.
-4. Permitir descargar el reporte JSON desde la interfaz web.
-5. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
+2. Integrar un preprocesamiento controlado para macros y cabeceras complejas.
+3. Permitir descargar el reporte JSON desde la interfaz web.
+4. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
    de correccion y cobertura de categorias.
-6. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
+5. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
    deja de ser exclusivamente local.
