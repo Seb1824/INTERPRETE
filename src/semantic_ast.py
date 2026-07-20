@@ -4,7 +4,13 @@ import re
 
 from src.ast_builder import SourceASTNode, limpiar_comentarios_codigo
 from src.parser import DiagnosticEntry
-from src.symbol_table import Scope, Symbol, SymbolTable, construir_tabla_simbolos
+from src.symbol_table import (
+    Scope,
+    Symbol,
+    SymbolTable,
+    construir_tabla_simbolos,
+    describir_tipo,
+)
 
 
 _PATRON_INCLUDE_STDIO = re.compile(r'#include\s*[<"]stdio\.h[>"]')
@@ -256,27 +262,19 @@ class ASTSemanticAnalyzer:
 
             if tipo_izquierdo is None or tipo_derecho is None:
                 continue
-            if _tipos_compatibles(tipo_izquierdo, tipo_derecho):
-                continue
-
-            clave = (decl.linea, decl.columna, nombre)
-            if clave in reportados:
-                continue
-            reportados.add(clave)
-
-            diagnosticos.append(
-                self._crear_diagnostico(
-                    nodo=decl,
-                    severidad="warning",
-                    mensaje=(
-                        f"analizador semantico AST: inicializacion de "
-                        f"'{nombre}' ({tipo_izquierdo}) con un valor de "
-                        f"tipo incompatible ({tipo_derecho})"
-                    ),
-                    tipo_error="type_mismatch",
-                    simbolo=nombre,
-                )
+            diagnostico = self._diagnostico_conversion(
+                nodo=decl,
+                expresion=init,
+                tipo_destino=tipo_izquierdo,
+                tipo_origen=tipo_derecho,
+                simbolo=nombre,
+                contexto="inicializacion",
             )
+            if diagnostico is not None:
+                clave = (decl.linea, decl.columna, nombre)
+                if clave not in reportados:
+                    reportados.add(clave)
+                    diagnosticos.append(diagnostico)
 
         for asignacion in _buscar_nodos(self.ast_codigo, "Assignment"):
             if asignacion.atributos.get("op") != "=":
@@ -287,75 +285,101 @@ class ASTSemanticAnalyzer:
             if lvalue is None or rvalue is None:
                 continue
 
-            nombre = lvalue.atributos.get("name") if lvalue.tipo == "ID" else None
-            if not nombre:
-                continue
-
-            simbolo = self.tabla_simbolos.resolver(
-                nombre,
-                self._ambito_en_linea(asignacion.linea or 1),
+            ambito = self._ambito_en_linea(asignacion.linea or 1)
+            nombre = _nombre_expresion(lvalue) or "expresion"
+            tipo_izquierdo = _inferir_tipo_expresion(
+                lvalue,
+                self.tabla_simbolos,
+                ambito,
             )
-            if simbolo is None:
-                continue
-
-            tipo_izquierdo = simbolo.tipo_dato
             tipo_derecho = _inferir_tipo_expresion(
                 rvalue,
                 self.tabla_simbolos,
-                self._ambito_en_linea(asignacion.linea or 1),
+                ambito,
             )
 
-            if tipo_derecho is None:
+            if tipo_izquierdo is None or tipo_derecho is None:
                 continue
-            if _tipos_compatibles(tipo_izquierdo, tipo_derecho):
-                continue
-
-            clave = (asignacion.linea, asignacion.columna, nombre)
-            if clave in reportados:
-                continue
-            reportados.add(clave)
-
-            diagnosticos.append(
-                self._crear_diagnostico(
-                    nodo=asignacion,
-                    severidad="warning",
-                    mensaje=(
-                        f"analizador semantico AST: asignacion a "
-                        f"'{nombre}' ({tipo_izquierdo}) de un valor de "
-                        f"tipo incompatible ({tipo_derecho})"
-                    ),
-                    tipo_error="type_mismatch",
-                    simbolo=nombre,
-                )
+            diagnostico = self._diagnostico_conversion(
+                nodo=asignacion,
+                expresion=rvalue,
+                tipo_destino=tipo_izquierdo,
+                tipo_origen=tipo_derecho,
+                simbolo=nombre,
+                contexto="asignacion",
             )
+            if diagnostico is not None:
+                clave = (asignacion.linea, asignacion.columna, nombre)
+                if clave not in reportados:
+                    reportados.add(clave)
+                    diagnosticos.append(diagnostico)
 
         return diagnosticos
+
+    def _diagnostico_conversion(
+        self,
+        nodo: SourceASTNode,
+        expresion: SourceASTNode,
+        tipo_destino: str,
+        tipo_origen: str,
+        simbolo: str,
+        contexto: str,
+    ) -> DiagnosticEntry | None:
+        destino = _resolver_alias_tipo(tipo_destino, self.tabla_simbolos)
+        origen = _resolver_alias_tipo(tipo_origen, self.tabla_simbolos)
+
+        if not _tipos_compatibles(destino, origen):
+            return self._crear_diagnostico(
+                nodo=nodo,
+                severidad="warning",
+                mensaje=(
+                    f"analizador semantico AST: {contexto} de "
+                    f"'{simbolo}' ({tipo_destino}) con un valor de "
+                    f"tipo incompatible ({tipo_origen})"
+                ),
+                tipo_error="type_mismatch",
+                simbolo=simbolo,
+            )
+
+        if _es_conversion_peligrosa(destino, origen, expresion):
+            return self._crear_diagnostico(
+                nodo=nodo,
+                severidad="warning",
+                mensaje=(
+                    f"analizador semantico AST: {contexto} de "
+                    f"'{simbolo}' convierte de '{tipo_origen}' a "
+                    f"'{tipo_destino}' y puede perder informacion"
+                ),
+                tipo_error="dangerous_conversion",
+                simbolo=simbolo,
+            )
+
+        return None
     
     def _analizar_argumentos_llamadas(self) -> list[DiagnosticEntry]:
         diagnosticos = []
 
         for llamada in _buscar_nodos(self.ast_codigo, "FuncCall"):
-            nombre = _nombre_funcion_llamada(llamada)
-            if not nombre:
-                continue
-
-            simbolo = self.tabla_simbolos.resolver(
-                nombre,
-                self.tabla_simbolos.ambito_global,
+            ambito = self._ambito_en_linea(llamada.linea or 1)
+            firma = _resolver_firma_llamada(
+                llamada,
+                self.tabla_simbolos,
+                ambito,
             )
-            if simbolo is None or simbolo.clase not in {"funcion", "funcion_externa"}:
+            if firma is None:
                 continue
-            if not simbolo.firma_parametros_definida:
+            nombre, tipos_parametros, firma_definida, es_variadica = firma
+            if not firma_definida:
                 continue
 
             args = _hijo_por_rol(llamada, "args")
             argumentos = args.hijos if args is not None else []
             cantidad_real = len(argumentos)
-            cantidad_esperada = len(simbolo.tipos_parametros)
+            cantidad_esperada = len(tipos_parametros)
 
             cantidad_invalida = (
                 cantidad_real < cantidad_esperada
-                if simbolo.es_variadica
+                if es_variadica
                 else cantidad_real != cantidad_esperada
             )
             if cantidad_invalida:
@@ -374,9 +398,8 @@ class ASTSemanticAnalyzer:
                 )
                 continue
 
-            ambito = self._ambito_en_linea(llamada.linea or 1)
             for posicion, (argumento, tipo_esperado) in enumerate(
-                zip(argumentos, simbolo.tipos_parametros),
+                zip(argumentos, tipos_parametros),
                 start=1,
             ):
                 tipo_real = _inferir_tipo_expresion(
@@ -398,6 +421,25 @@ class ASTSemanticAnalyzer:
                     tipo_esperado_resuelto,
                     tipo_real_resuelto,
                 ):
+                    if _es_conversion_peligrosa(
+                        tipo_esperado_resuelto,
+                        tipo_real_resuelto,
+                        argumento,
+                    ):
+                        diagnosticos.append(
+                            self._crear_diagnostico(
+                                nodo=argumento,
+                                severidad="warning",
+                                mensaje=(
+                                    f"analizador semantico AST: el argumento "
+                                    f"{posicion} de '{nombre}' convierte de "
+                                    f"'{tipo_real}' a '{tipo_esperado}' y "
+                                    "puede perder informacion"
+                                ),
+                                tipo_error="dangerous_conversion",
+                                simbolo=nombre,
+                            )
+                        )
                     continue
 
                 descripcion_esperada = _describir_tipo_resuelto(
@@ -583,7 +625,34 @@ class ASTSemanticAnalyzer:
             )
             if tipo_expresion is None:
                 continue
-            if _tipos_compatibles(tipo_retorno, tipo_expresion):
+            retorno_resuelto = _resolver_alias_tipo(
+                tipo_retorno,
+                self.tabla_simbolos,
+            )
+            expresion_resuelta = _resolver_alias_tipo(
+                tipo_expresion,
+                self.tabla_simbolos,
+            )
+            if _tipos_compatibles(retorno_resuelto, expresion_resuelta):
+                if _es_conversion_peligrosa(
+                    retorno_resuelto,
+                    expresion_resuelta,
+                    expr,
+                ):
+                    diagnosticos.append(
+                        self._crear_diagnostico(
+                            nodo=nodo_return,
+                            severidad="warning",
+                            mensaje=(
+                                f"analizador semantico AST: la funcion "
+                                f"'{nombre}' convierte el retorno de "
+                                f"'{tipo_expresion}' a '{tipo_retorno}' y "
+                                "puede perder informacion"
+                            ),
+                            tipo_error="dangerous_conversion",
+                            simbolo=nombre,
+                        )
+                    )
                 continue
 
             diagnosticos.append(
@@ -650,6 +719,18 @@ def _nombre_funcion_llamada(llamada: SourceASTNode) -> str | None:
     return nombre.atributos.get("name")
 
 
+def _nombre_expresion(nodo: SourceASTNode) -> str | None:
+    if nodo.tipo == "ID":
+        return nodo.atributos.get("name")
+    if nodo.tipo == "StructRef":
+        campo = _hijo_por_rol(nodo, "field")
+        return campo.atributos.get("name") if campo else None
+    if nodo.tipo == "ArrayRef":
+        base = _hijo_por_rol(nodo, "name")
+        return _nombre_expresion(base) if base else None
+    return None
+
+
 def _nombre_y_declaracion_funcion(
     funcion: SourceASTNode,
 ) -> tuple[str, SourceASTNode | None]:
@@ -660,26 +741,15 @@ def _nombre_y_declaracion_funcion(
 
 
 def _tipo_retorno_funcion(funcion: SourceASTNode) -> str | None:
-    actual = _hijo_por_rol(funcion, "decl")
-
-    while actual is not None:
-        if actual.tipo == "IdentifierType":
-            return actual.atributos.get("names")
-        if actual.tipo == "PtrDecl":
-            interno = _hijo_por_rol(actual, "type")
-            base = _tipo_retorno_funcion_desde(interno)
-            return f"{base} *" if base else None
-        actual = _hijo_por_rol(actual, "type")
-
-    return None
-
-
-def _tipo_retorno_funcion_desde(nodo: SourceASTNode | None) -> str | None:
-    while nodo is not None:
-        if nodo.tipo == "IdentifierType":
-            return nodo.atributos.get("names")
-        nodo = _hijo_por_rol(nodo, "type")
-    return None
+    declaracion = _hijo_por_rol(funcion, "decl")
+    tipo_funcion = (
+        _hijo_por_rol(declaracion, "type")
+        if declaracion is not None
+        else None
+    )
+    if tipo_funcion is None or tipo_funcion.tipo != "FuncDecl":
+        return None
+    return _describir_tipo_nodo(_hijo_por_rol(tipo_funcion, "type"))
 
 
 def _siempre_retorna(nodo: SourceASTNode) -> bool:
@@ -797,22 +867,7 @@ def _describir_tipo_nodo(nodo: SourceASTNode | None) -> str | None:
     """Extrae el tipo como string desde un nodo de tipo del AST."""
     if nodo is None:
         return None
-
-    if nodo.tipo == "IdentifierType":
-        return nodo.atributos.get("names")
-
-    if nodo.tipo == "PtrDecl":
-        interno = _hijo_por_rol(nodo, "type")
-        base = _describir_tipo_nodo(interno)
-        return f"{base} *" if base else None
-
-    if nodo.tipo == "ArrayDecl":
-        interno = _hijo_por_rol(nodo, "type")
-        base = _describir_tipo_nodo(interno)
-        return f"{base}[]" if base else None
-
-    interno = _hijo_por_rol(nodo, "type")
-    return _describir_tipo_nodo(interno)
+    return describir_tipo(nodo)
 
 
 def _inferir_tipo_expresion(
@@ -845,10 +900,14 @@ def _inferir_tipo_expresion(
         if ambito is not None:
             simbolo = tabla.resolver(nombre, ambito)
             if simbolo is not None:
+                if simbolo.clase in {"funcion", "funcion_externa"}:
+                    return _tipo_puntero_funcion_simbolo(simbolo)
                 return simbolo.tipo_dato
         for ambito_actual in tabla.todos_los_ambitos():
             simbolo = ambito_actual.buscar_local(nombre)
             if simbolo is not None:
+                if simbolo.clase in {"funcion", "funcion_externa"}:
+                    return _tipo_puntero_funcion_simbolo(simbolo)
                 return simbolo.tipo_dato
         return None
 
@@ -865,6 +924,8 @@ def _inferir_tipo_expresion(
                 if expr
                 else None
             )
+            if base and base.startswith("puntero a funcion"):
+                return base
             return f"{base} *" if base else None
         if op == "*":
             expr = _hijo_por_rol(nodo, "expr")
@@ -873,7 +934,9 @@ def _inferir_tipo_expresion(
                 if expr
                 else None
             )
-            return base.replace(" *", "", 1) if base and " *" in base else None
+            if base and base.startswith("puntero a funcion"):
+                return base
+            return base.rsplit(" *", 1)[0] if base and " *" in base else None
         if op == "sizeof":
             return "unsigned long"
         if op == "!":
@@ -903,16 +966,55 @@ def _inferir_tipo_expresion(
             if derecha
             else None
         )
-        return _tipo_resultado_operacion(tipo_izquierdo, tipo_derecho)
+        return _tipo_resultado_operacion(
+            tipo_izquierdo,
+            tipo_derecho,
+            tabla,
+            operador,
+        )
 
     if nodo.tipo == "FuncCall":
-        nombre = _nombre_funcion_llamada(nodo)
-        if not nombre:
+        firma = _resolver_firma_llamada(
+            nodo,
+            tabla,
+            ambito or tabla.ambito_global,
+        )
+        if firma is None:
             return None
+        nombre_llamada = _hijo_por_rol(nodo, "name")
+        tipo_llamable = (
+            _inferir_tipo_expresion(nombre_llamada, tabla, ambito)
+            if nombre_llamada
+            else None
+        )
+        if tipo_llamable:
+            retorno = _retorno_tipo_llamable(tipo_llamable)
+            if retorno:
+                return _resolver_alias_tipo(retorno, tabla)
+
+        nombre = firma[0]
         simbolo = tabla.resolver(nombre, ambito or tabla.ambito_global)
-        if simbolo is None or "->" not in simbolo.tipo_dato:
+        if simbolo is not None and "->" in simbolo.tipo_dato:
+            return _resolver_alias_tipo(
+                simbolo.tipo_dato.split("->", 1)[1].strip(),
+                tabla,
+            )
+        return None
+
+    if nodo.tipo == "StructRef":
+        expresion_base = _hijo_por_rol(nodo, "name")
+        campo = _hijo_por_rol(nodo, "field")
+        if expresion_base is None or campo is None:
             return None
-        return simbolo.tipo_dato.split("->", 1)[1].strip()
+        nombre_campo = campo.atributos.get("name")
+        tipo_base = _inferir_tipo_expresion(expresion_base, tabla, ambito)
+        if not nombre_campo or not tipo_base:
+            return None
+        tipo_compuesto = _resolver_alias_tipo(tipo_base, tabla)
+        if nodo.atributos.get("type") == "->":
+            tipo_compuesto = _quitar_nivel_puntero(tipo_compuesto)
+        miembro = tabla.buscar_miembro(tipo_compuesto.strip(), nombre_campo)
+        return miembro.tipo_dato if miembro else None
 
     if nodo.tipo == "ArrayRef":
         nombre = _hijo_por_rol(nodo, "name")
@@ -939,7 +1041,29 @@ def _inferir_tipo_expresion(
             if falso
             else None
         )
-        return _tipo_resultado_operacion(tipo_verdadero, tipo_falso)
+        return _tipo_resultado_operacion(
+            tipo_verdadero,
+            tipo_falso,
+            tabla,
+            "?:",
+        )
+
+    if nodo.tipo == "Assignment":
+        destino = _hijo_por_rol(nodo, "lvalue")
+        return (
+            _inferir_tipo_expresion(destino, tabla, ambito)
+            if destino
+            else None
+        )
+
+    if nodo.tipo == "ExprList":
+        if not nodo.hijos:
+            return None
+        return _inferir_tipo_expresion(nodo.hijos[-1], tabla, ambito)
+
+    if nodo.tipo == "CompoundLiteral":
+        tipo_literal = _hijo_por_rol(nodo, "type")
+        return _describir_tipo_nodo(tipo_literal)
 
     return None
 
@@ -947,23 +1071,363 @@ def _inferir_tipo_expresion(
 def _tipo_resultado_operacion(
     tipo_izquierdo: str | None,
     tipo_derecho: str | None,
+    tabla: SymbolTable,
+    operador: str,
 ) -> str | None:
     if tipo_izquierdo is None:
         return tipo_derecho
     if tipo_derecho is None:
         return tipo_izquierdo
 
-    tipos = {
-        _normalizar_tipo(tipo_izquierdo),
-        _normalizar_tipo(tipo_derecho),
-    }
+    izquierdo = _normalizar_tipo(
+        _resolver_alias_tipo(tipo_izquierdo, tabla)
+    )
+    derecho = _normalizar_tipo(
+        _resolver_alias_tipo(tipo_derecho, tabla)
+    )
+
+    if "*" in izquierdo or "*" in derecho:
+        if operador in {"+", "-"}:
+            if "*" in izquierdo and _es_tipo_entero(derecho):
+                return tipo_izquierdo
+            if operador == "+" and "*" in derecho and _es_tipo_entero(izquierdo):
+                return tipo_derecho
+            if "*" in izquierdo and "*" in derecho and operador == "-":
+                return "ptrdiff_t"
+        return tipo_izquierdo
+
+    tipos = {izquierdo, derecho}
     if "long double" in tipos:
         return "long double"
     if "double" in tipos:
         return "double"
     if "float" in tipos:
         return "float"
-    return tipo_izquierdo
+
+    izquierdo_promovido = _promover_entero(izquierdo)
+    derecho_promovido = _promover_entero(derecho)
+    if not _es_tipo_entero(izquierdo_promovido):
+        return tipo_izquierdo
+    if not _es_tipo_entero(derecho_promovido):
+        return tipo_derecho
+    return _tipo_entero_comun(izquierdo_promovido, derecho_promovido)
+
+
+def _resolver_firma_llamada(
+    llamada: SourceASTNode,
+    tabla: SymbolTable,
+    ambito: Scope,
+) -> tuple[str, list[str], bool, bool] | None:
+    llamable = _hijo_por_rol(llamada, "name")
+    if llamable is None:
+        return None
+
+    nombre = _nombre_expresion(llamable) or "expresion invocable"
+    if llamable.tipo == "ID":
+        simbolo = tabla.resolver(nombre, ambito)
+        if simbolo is not None and (
+            simbolo.clase in {"funcion", "funcion_externa"}
+            or simbolo.es_puntero_funcion
+        ):
+            return (
+                nombre,
+                list(simbolo.tipos_parametros),
+                simbolo.firma_parametros_definida,
+                simbolo.es_variadica,
+            )
+
+    tipo_llamable = _inferir_tipo_expresion(llamable, tabla, ambito)
+    if tipo_llamable is None:
+        return None
+    tipo_resuelto = _resolver_alias_tipo(tipo_llamable, tabla)
+    firma = _firma_desde_tipo_puntero(tipo_resuelto)
+    if firma is None:
+        return None
+
+    parametros, definida, variadica, _ = firma
+    return nombre, parametros, definida, variadica
+
+
+def _tipo_puntero_funcion_simbolo(simbolo: Symbol) -> str:
+    if simbolo.tipo_dato.startswith("puntero a funcion"):
+        return simbolo.tipo_dato
+
+    parametros = list(simbolo.tipos_parametros)
+    if simbolo.es_variadica:
+        parametros.append("...")
+    if simbolo.firma_parametros_definida:
+        contenido = ", ".join(parametros) or "void"
+    else:
+        contenido = "no especificados"
+
+    retorno = "desconocido"
+    if "->" in simbolo.tipo_dato:
+        retorno = simbolo.tipo_dato.split("->", 1)[1].strip()
+    return f"puntero a funcion ({contenido}) -> {retorno}"
+
+
+def _firma_desde_tipo_puntero(
+    tipo: str,
+) -> tuple[list[str], bool, bool, str] | None:
+    prefijo = "puntero a funcion ("
+    if not tipo.startswith(prefijo):
+        return None
+
+    inicio = len(prefijo)
+    profundidad = 1
+    cierre = None
+    for indice in range(inicio, len(tipo)):
+        caracter = tipo[indice]
+        if caracter == "(":
+            profundidad += 1
+        elif caracter == ")":
+            profundidad -= 1
+            if profundidad == 0:
+                cierre = indice
+                break
+
+    if cierre is None:
+        return None
+    resto = tipo[cierre + 1:].strip()
+    if not resto.startswith("->"):
+        return None
+
+    contenido = tipo[inicio:cierre].strip()
+    retorno = resto[2:].strip()
+    if contenido == "no especificados":
+        return [], False, False, retorno
+    if contenido in {"", "void"}:
+        return [], True, False, retorno
+
+    parametros = _separar_parametros_tipo(contenido)
+    variadica = bool(parametros and parametros[-1] == "...")
+    if variadica:
+        parametros.pop()
+    return parametros, True, variadica, retorno
+
+
+def _separar_parametros_tipo(contenido: str) -> list[str]:
+    parametros = []
+    inicio = 0
+    profundidad = 0
+    for indice, caracter in enumerate(contenido):
+        if caracter == "(":
+            profundidad += 1
+        elif caracter == ")":
+            profundidad -= 1
+        elif caracter == "," and profundidad == 0:
+            parametros.append(contenido[inicio:indice].strip())
+            inicio = indice + 1
+    parametros.append(contenido[inicio:].strip())
+    return parametros
+
+
+def _retorno_tipo_llamable(tipo: str) -> str | None:
+    firma = _firma_desde_tipo_puntero(tipo)
+    if firma is not None:
+        return firma[3]
+    if tipo.startswith("funcion ->"):
+        return tipo.split("->", 1)[1].strip()
+    return None
+
+
+def _quitar_nivel_puntero(tipo: str) -> str:
+    if tipo.startswith("puntero a funcion"):
+        return tipo
+    return re.sub(r"\s*\*\s*$", "", tipo).strip()
+
+
+def _es_tipo_entero(tipo: str) -> bool:
+    normalizado = _normalizar_tipo(tipo)
+    return normalizado in {
+        "_bool",
+        "char",
+        "signed char",
+        "unsigned char",
+        "short",
+        "short int",
+        "signed short",
+        "signed short int",
+        "unsigned short",
+        "unsigned short int",
+        "int",
+        "signed",
+        "signed int",
+        "unsigned",
+        "unsigned int",
+        "long",
+        "long int",
+        "signed long",
+        "signed long int",
+        "unsigned long",
+        "unsigned long int",
+        "long long",
+        "long long int",
+        "signed long long",
+        "signed long long int",
+        "unsigned long long",
+        "unsigned long long int",
+    } or normalizado.startswith("enum ") or _es_alias_entero(normalizado)
+
+
+def _promover_entero(tipo: str) -> str:
+    normalizado = _normalizar_tipo(tipo)
+    if normalizado in {
+        "_bool",
+        "char",
+        "signed char",
+        "unsigned char",
+        "short",
+        "short int",
+        "signed short",
+        "signed short int",
+        "unsigned short",
+        "unsigned short int",
+    } or normalizado.startswith("enum "):
+        return "int"
+
+    equivalencias = {
+        "signed": "int",
+        "signed int": "int",
+        "unsigned": "unsigned int",
+        "long int": "long",
+        "signed long": "long",
+        "signed long int": "long",
+        "unsigned long int": "unsigned long",
+        "long long int": "long long",
+        "signed long long": "long long",
+        "signed long long int": "long long",
+        "unsigned long long int": "unsigned long long",
+    }
+    return equivalencias.get(normalizado, normalizado)
+
+
+def _tipo_entero_comun(izquierdo: str, derecho: str) -> str:
+    if izquierdo == derecho:
+        return izquierdo
+
+    informacion = {
+        "int": (1, 32, True),
+        "unsigned int": (1, 32, False),
+        "long": (2, 32, True),
+        "unsigned long": (2, 32, False),
+        "long long": (3, 64, True),
+        "unsigned long long": (3, 64, False),
+    }
+    info_izquierda = informacion.get(izquierdo, informacion["int"])
+    info_derecha = informacion.get(derecho, informacion["int"])
+    rango_izquierdo, bits_izquierdo, signo_izquierdo = info_izquierda
+    rango_derecho, bits_derecho, signo_derecho = info_derecha
+
+    if signo_izquierdo == signo_derecho:
+        return (
+            izquierdo
+            if rango_izquierdo >= rango_derecho
+            else derecho
+        )
+
+    if signo_izquierdo:
+        tipo_con_signo, info_con_signo = izquierdo, info_izquierda
+        tipo_sin_signo, info_sin_signo = derecho, info_derecha
+    else:
+        tipo_con_signo, info_con_signo = derecho, info_derecha
+        tipo_sin_signo, info_sin_signo = izquierdo, info_izquierda
+
+    if info_sin_signo[0] >= info_con_signo[0]:
+        return tipo_sin_signo
+    if info_con_signo[1] > info_sin_signo[1]:
+        return tipo_con_signo
+    return {
+        "int": "unsigned int",
+        "long": "unsigned long",
+        "long long": "unsigned long long",
+    }.get(tipo_con_signo, tipo_sin_signo)
+
+
+def _es_conversion_peligrosa(
+    tipo_destino: str,
+    tipo_origen: str,
+    expresion: SourceASTNode,
+) -> bool:
+    destino = _normalizar_tipo(tipo_destino)
+    origen = _normalizar_tipo(tipo_origen)
+    flotantes = {"float", "double", "long double"}
+
+    if _es_tipo_entero(destino) and origen in flotantes:
+        return True
+    if destino == "float" and origen in {"double", "long double"}:
+        return True
+    if destino == "double" and origen == "long double":
+        return True
+    if not (_es_tipo_entero(destino) and _es_tipo_entero(origen)):
+        return False
+
+    rango_destino = _rango_tipo_entero(destino)
+    valor = _evaluar_constante(expresion)
+    if rango_destino is not None and isinstance(valor, int):
+        return not rango_destino[0] <= valor <= rango_destino[1]
+
+    destino_promovido = _promover_entero(destino)
+    origen_promovido = _promover_entero(origen)
+    jerarquia = {
+        "int": 1,
+        "unsigned int": 1,
+        "long": 2,
+        "unsigned long": 2,
+        "long long": 3,
+        "unsigned long long": 3,
+    }
+    if jerarquia.get(origen_promovido, 1) > jerarquia.get(
+        destino_promovido,
+        1,
+    ):
+        return True
+    return (
+        destino_promovido.startswith("unsigned")
+        and not origen_promovido.startswith("unsigned")
+    )
+
+
+def _rango_tipo_entero(tipo: str) -> tuple[int, int] | None:
+    normalizado = _normalizar_tipo(tipo)
+    normalizado = {
+        "signed": "int",
+        "signed int": "int",
+        "unsigned": "unsigned int",
+        "short int": "short",
+        "signed short": "short",
+        "signed short int": "short",
+        "unsigned short int": "unsigned short",
+        "long int": "long",
+        "signed long": "long",
+        "signed long int": "long",
+        "unsigned long int": "unsigned long",
+        "long long int": "long long",
+        "signed long long": "long long",
+        "signed long long int": "long long",
+        "unsigned long long int": "unsigned long long",
+    }.get(normalizado, normalizado)
+    bits_y_signo = {
+        "_bool": (1, False),
+        "char": (8, True),
+        "signed char": (8, True),
+        "unsigned char": (8, False),
+        "short": (16, True),
+        "unsigned short": (16, False),
+        "int": (32, True),
+        "unsigned int": (32, False),
+        "long": (32, True),
+        "unsigned long": (32, False),
+        "long long": (64, True),
+        "unsigned long long": (64, False),
+    }
+    configuracion = bits_y_signo.get(normalizado)
+    if configuracion is None:
+        return None
+    bits, con_signo = configuracion
+    if con_signo:
+        return -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
+    return 0, 2**bits - 1
 
 
 def _tipos_compatibles(tipo_izq: str, tipo_der: str) -> bool:
@@ -977,9 +1441,26 @@ def _tipos_compatibles(tipo_izq: str, tipo_der: str) -> bool:
     if izq == der:
         return True
 
-    enteros = {"int", "short", "long", "unsigned", "char", "_bool",
-               "unsigned int", "unsigned long", "unsigned short",
-               "unsigned char", "long long", "signed"}
+    funcion_izquierda = izq.startswith("puntero a funcion")
+    funcion_derecha = der.startswith("puntero a funcion")
+    if funcion_izquierda or funcion_derecha:
+        return False
+
+    enteros = {
+        "int",
+        "short",
+        "long",
+        "unsigned",
+        "char",
+        "_bool",
+        "unsigned int",
+        "unsigned long",
+        "unsigned short",
+        "unsigned char",
+        "long long",
+        "unsigned long long",
+        "signed",
+    }
     if _es_alias_entero(izq):
         enteros.add(izq)
     if _es_alias_entero(der):
@@ -1036,6 +1517,25 @@ def _es_alias_entero(tipo: str) -> bool:
 def _resolver_alias_tipo(tipo: str, tabla: SymbolTable) -> str:
     actual = tipo.strip()
     for _ in range(8):
+        firma = _firma_desde_tipo_puntero(actual)
+        if firma is not None:
+            parametros, definida, variadica, retorno = firma
+            parametros_resueltos = [
+                _resolver_alias_tipo(parametro, tabla)
+                for parametro in parametros
+            ]
+            if variadica:
+                parametros_resueltos.append("...")
+            if definida:
+                contenido = ", ".join(parametros_resueltos) or "void"
+            else:
+                contenido = "no especificados"
+            retorno_resuelto = _resolver_alias_tipo(retorno, tabla)
+            return (
+                f"puntero a funcion ({contenido}) -> "
+                f"{retorno_resuelto}"
+            )
+
         coincidencia = re.fullmatch(
             r"(?P<base>[A-Za-z_][A-Za-z0-9_]*)"
             r"(?P<sufijo>(?:\s*\*)*|\[\])",

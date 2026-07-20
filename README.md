@@ -66,7 +66,8 @@ corregirlo.
 
 El punto comun para CLI y web es `src/analyzer.py`. Su funcion
 `analizar_archivo()` ejecuta el pipeline y devuelve un `AnalysisResult` con
-todos los productos intermedios y finales.
+todos los productos intermedios y finales. `src/report.py` construye el mismo
+reporte JSON para ambos modos de ejecucion.
 
 ## Funcionalidades implementadas
 
@@ -250,6 +251,8 @@ Registra:
 - distincion entre prototipos no especificados, parametros `(void)` y
   funciones variadicas
 - firmas obtenidas desde definiciones, prototipos y cabeceras incluidas
+- miembros y tipos de estructuras y uniones
+- punteros a funcion declarados directamente o mediante `typedef`
 
 La resolucion de un identificador comienza en el ambito actual y continua
 hacia sus padres. Esto permite manejar correctamente el sombreado de variables.
@@ -282,12 +285,19 @@ depender exclusivamente de GCC:
 - cantidad incorrecta de argumentos en llamadas a funciones
 - tipo incompatible de cada argumento respecto a su parametro
 - alias `typedef` resueltos antes de comparar tipos de argumentos
+- tipos de miembros accedidos con `.` y `->`
+- firmas y llamadas realizadas mediante punteros a funcion
+- funciones usadas como callbacks y funciones que devuelven callbacks
+- llamadas anidadas cuyo retorno alimenta otra llamada
+- promociones enteras y conversiones aritmeticas usuales
+- conversiones numericas que pueden perder rango, precision o signo
 - variables locales usadas antes de recibir un valor
 
 La inferencia de argumentos contempla literales, identificadores, casts,
-punteros, arreglos, operaciones binarias, expresiones ternarias y tipos de
-retorno de llamadas. En funciones variadicas valida los parametros fijos y
-permite los argumentos adicionales.
+punteros, arreglos, miembros de estructuras, callbacks, operaciones binarias,
+expresiones ternarias y tipos de retorno de llamadas simples o anidadas. En
+funciones variadicas valida los parametros fijos y permite los argumentos
+adicionales.
 
 La evaluacion de constantes soporta numeros, operadores unarios, sumas,
 restas, multiplicaciones, divisiones, modulo y conversiones simples.
@@ -349,6 +359,7 @@ La aplicacion Flask esta definida en `web_app.py` y ofrece:
 - resumen de errores, advertencias y cobertura
 - mensajes mejorados con contexto de codigo
 - notas de GCC asociadas
+- descarga del reporte JSON completo del analisis actual
 - sintesis de voz individual o para todos los diagnosticos
 - controles para pausar, continuar, detener y ajustar la velocidad de lectura
 - pronunciacion adaptada de simbolos de C, como `#` leido como "numeral"
@@ -386,6 +397,7 @@ COMPILADOR/
 |   |-- explainer.py           # Explicaciones pedagogicas
 |   |-- lexer.py               # Ejecucion de GCC y tokenizacion
 |   |-- parser.py              # Diagnosticos y arbol de diagnostico
+|   |-- report.py              # Reporte JSON compartido por CLI y web
 |   |-- semantic.py            # Coordinador y respaldo textual
 |   |-- semantic_ast.py        # Reglas semanticas sobre el AST
 |   |-- symbol_table.py        # Tabla de simbolos, ambitos y firmas
@@ -501,6 +513,9 @@ Agrega:
 ```powershell
 python main.py examples\variable_no_declarada.c --json outputs\diagnosticos.json
 ```
+
+En la interfaz web, despues de analizar el codigo, el boton `Descargar JSON`
+genera el mismo formato de reporte sin exponer la ruta temporal del servidor.
 
 ### Combinar debug y JSON
 
@@ -623,6 +638,11 @@ Estructura resumida:
 | `semantico_variable_no_inicializada.c` | Variable usada sin inicializar |
 | `semantico_argumento_tipo_incorrecto.c` | Tipo individual de argumento incompatible |
 | `semantico_preprocesador_controlado.c` | Macros y tipos de cabeceras controladas |
+| `semantico_estructuras_inferencia.c` | Inferencia del tipo de un miembro de estructura |
+| `semantico_puntero_funcion.c` | Callback declarado mediante `typedef` |
+| `semantico_callback_anidado.c` | Funcion que devuelve un puntero a funcion |
+| `semantico_llamada_anidada.c` | Tipo incorrecto propagado entre llamadas anidadas |
+| `semantico_conversion_compleja.c` | Conversion numerica fuera del rango de destino |
 
 Ejecutar cualquier ejemplo:
 
@@ -641,7 +661,7 @@ python -m pytest -q
 Ultima verificacion del estado documentado:
 
 ```text
-234 passed
+252 passed
 ```
 
 La cobertura funcional incluye:
@@ -657,6 +677,9 @@ La cobertura funcional incluye:
 - firmas normales, `(void)` y variadicas
 - validacion de cantidad y tipos individuales de argumentos
 - resolucion de alias `typedef` en llamadas
+- miembros de estructuras y uniones
+- punteros a funcion, callbacks y llamadas anidadas
+- promociones enteras y conversiones numericas con perdida
 - sombreado y redeclaraciones
 - usos no resueltos
 - reglas semanticas AST y respaldo textual
@@ -670,6 +693,7 @@ La cobertura funcional incluye:
 - manejo de errores externos
 - API estructurada `analizar_archivo()`
 - rutas web, codigo pegado y carga de archivos
+- descarga web del mismo reporte JSON disponible en CLI
 - validaciones de la interfaz Flask
 - controles web de sintesis de voz
 
@@ -715,8 +739,9 @@ diagnostico GCC
 - Solo analiza codigo C.
 - Requiere GCC instalado localmente.
 - La clasificacion depende de patrones de mensajes de GCC en ingles.
-- El analisis de tipos es parcial: no cubre completamente miembros de
-  estructuras, punteros a funciones ni todas las promociones de tipos de C.
+- El analisis de tipos cubre estructuras, punteros a funcion, llamadas
+  anidadas y promociones frecuentes, pero no implementa todos los casos del
+  estandar C ni todas las extensiones de GCC.
 - El analisis de flujo de control cubre casos basicos, no todos los caminos de
   `switch`, ciclos, `goto` o construcciones complejas.
 - El preprocesamiento del AST reconoce las cabeceras controladas incluidas en
@@ -726,17 +751,15 @@ diagnostico GCC
   construcciones que `pycparser` no comprenda.
 - El respaldo por expresiones regulares es menos preciso que el analisis AST.
 - La interfaz Flask incluida es un servidor de desarrollo local.
-- La interfaz web aun no descarga JSON directamente.
 - La sintesis de voz depende de la API, las voces y el idioma disponibles en el
   navegador y el sistema operativo.
 - El sistema propone sugerencias, pero no modifica automaticamente el codigo.
 
 ## Pendientes recomendados
 
-1. Permitir descargar el reporte JSON desde la interfaz web.
-2. Ampliar las cabeceras controladas y la inferencia para miembros de
-   estructuras y punteros a funciones.
-3. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
+1. Ampliar las cabeceras controladas para bibliotecas adicionales cuando los
+   nuevos casos de uso lo requieran.
+2. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
    de correccion y cobertura de categorias.
-4. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
+3. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
    deja de ser exclusivamente local.

@@ -16,6 +16,22 @@ class SymbolUse:
 
 
 @dataclass
+class CompoundMember:
+    nombre: str
+    tipo_dato: str
+    linea_declaracion: int
+    columna_declaracion: int
+
+    def to_dict(self) -> dict:
+        return {
+            "nombre": self.nombre,
+            "tipo_dato": self.tipo_dato,
+            "linea_declaracion": self.linea_declaracion,
+            "columna_declaracion": self.columna_declaracion,
+        }
+
+
+@dataclass
 class Symbol:
     nombre: str
     clase: str
@@ -26,6 +42,7 @@ class Symbol:
     tipos_parametros: list[str] = field(default_factory=list)
     firma_parametros_definida: bool = False
     es_variadica: bool = False
+    es_puntero_funcion: bool = False
     usos: list[SymbolUse] = field(default_factory=list)
 
     @property
@@ -48,6 +65,7 @@ class Symbol:
             "tipos_parametros": self.tipos_parametros,
             "firma_parametros_definida": self.firma_parametros_definida,
             "es_variadica": self.es_variadica,
+            "es_puntero_funcion": self.es_puntero_funcion,
         }
 
 
@@ -125,6 +143,7 @@ class SymbolTable:
         )
         self.usos_no_resueltos: list[UnresolvedSymbolUse] = []
         self.redeclaraciones: list[SymbolRedeclaration] = []
+        self.tipos_compuestos: dict[str, dict[str, CompoundMember]] = {}
         self._contador_ambitos = 1
 
     def crear_ambito(
@@ -226,6 +245,22 @@ class SymbolTable:
                 return ambito
         return None
 
+    def registrar_tipo_compuesto(
+        self,
+        tipo_dato: str,
+        miembros: list[CompoundMember],
+    ) -> None:
+        existentes = self.tipos_compuestos.setdefault(tipo_dato, {})
+        for miembro in miembros:
+            existentes[miembro.nombre] = miembro
+
+    def buscar_miembro(
+        self,
+        tipo_dato: str,
+        nombre_miembro: str,
+    ) -> CompoundMember | None:
+        return self.tipos_compuestos.get(tipo_dato, {}).get(nombre_miembro)
+
     def to_dict(self) -> dict:
         return {
             "ambito_global": self.ambito_global.to_dict(),
@@ -237,6 +272,13 @@ class SymbolTable:
                 redeclaracion.to_dict()
                 for redeclaracion in self.redeclaraciones
             ],
+            "tipos_compuestos": {
+                tipo: {
+                    nombre: miembro.to_dict()
+                    for nombre, miembro in miembros.items()
+                }
+                for tipo, miembros in self.tipos_compuestos.items()
+            },
         }
 
     def render(self) -> list[str]:
@@ -263,6 +305,16 @@ class SymbolTable:
                     f"ambito={redeclaracion.ambito_id}"
                 )
 
+        if self.tipos_compuestos:
+            lineas.append("- Tipos compuestos")
+            for tipo, miembros in self.tipos_compuestos.items():
+                lineas.append(f"  - {tipo}")
+                for miembro in miembros.values():
+                    lineas.append(
+                        f"    - {miembro.nombre}: {miembro.tipo_dato} "
+                        f"[linea={miembro.linea_declaracion}]"
+                    )
+
         return lineas
 
 
@@ -278,6 +330,11 @@ class SymbolTableBuilder:
         self.funciones_definidas: set[str] = set()
 
     def construir(self) -> SymbolTable:
+        self._registrar_tipos_compuestos(
+            self.ast_codigo,
+            alias_anonimo=None,
+        )
+
         for nombre in sorted(self.simbolos_externos):
             self.tabla.declarar(
                 ambito=self.tabla.ambito_global,
@@ -294,6 +351,42 @@ class SymbolTableBuilder:
             else:
                 self._visitar(nodo, self.tabla.ambito_global)
         return self.tabla
+
+    def _registrar_tipos_compuestos(
+        self,
+        nodo: SourceASTNode,
+        alias_anonimo: str | None,
+    ) -> None:
+        alias_hijos = alias_anonimo
+        if nodo.tipo == "Typedef":
+            alias_hijos = nodo.atributos.get("name") or alias_anonimo
+
+        if nodo.tipo in {"Struct", "Union"}:
+            clase = nodo.tipo.lower()
+            nombre = nodo.atributos.get("name") or alias_anonimo or "anonima"
+            miembros = []
+            for hijo in nodo.hijos:
+                if hijo.tipo != "Decl":
+                    continue
+                nombre_miembro = hijo.atributos.get("name")
+                tipo = _hijo_por_rol(hijo, "type")
+                if not nombre_miembro or tipo is None:
+                    continue
+                miembros.append(
+                    CompoundMember(
+                        nombre=nombre_miembro,
+                        tipo_dato=_describir_tipo(tipo),
+                        linea_declaracion=hijo.linea or 1,
+                        columna_declaracion=hijo.columna or 1,
+                    )
+                )
+            self.tabla.registrar_tipo_compuesto(
+                f"{clase} {nombre}",
+                miembros,
+            )
+
+        for hijo in nodo.hijos:
+            self._registrar_tipos_compuestos(hijo, alias_hijos)
 
     def _procesar_funcion(self, funcion: SourceASTNode) -> None:
         declaracion = _hijo_por_rol(funcion, "decl")
@@ -443,7 +536,20 @@ class SymbolTableBuilder:
 
         tipo = _hijo_por_rol(nodo, "type")
         tipo_dato = _describir_tipo(tipo) if tipo else "desconocido"
-        return self.tabla.declarar(
+        if clase == "typedef" and tipo is not None:
+            compuesto_anonimo = next(
+                (
+                    actual
+                    for actual in _recorrer_nodos(tipo)
+                    if actual.tipo in {"Struct", "Union"}
+                    and not actual.atributos.get("name")
+                ),
+                None,
+            )
+            if compuesto_anonimo is not None:
+                tipo_dato = f"{compuesto_anonimo.tipo.lower()} {nombre}"
+
+        simbolo = self.tabla.declarar(
             ambito=ambito,
             nombre=nombre,
             clase=clase,
@@ -451,6 +557,24 @@ class SymbolTableBuilder:
             linea=nodo.linea or 1,
             columna=nodo.columna or 1,
         )
+        if tipo is not None and _contiene_puntero_funcion(tipo):
+            simbolo.es_puntero_funcion = True
+            _actualizar_firma_funcion(simbolo, nodo)
+        elif tipo is not None and tipo.tipo == "TypeDecl":
+            identificador = _hijo_por_rol(tipo, "type")
+            if identificador is not None and identificador.tipo == "IdentifierType":
+                alias = self.tabla.ambito_global.buscar_local(
+                    identificador.atributos.get("names", "")
+                )
+                if alias is not None and alias.es_puntero_funcion:
+                    simbolo.tipo_dato = alias.tipo_dato
+                    simbolo.tipos_parametros = list(alias.tipos_parametros)
+                    simbolo.firma_parametros_definida = (
+                        alias.firma_parametros_definida
+                    )
+                    simbolo.es_variadica = alias.es_variadica
+                    simbolo.es_puntero_funcion = True
+        return simbolo
 
 
 def construir_tabla_simbolos(
@@ -461,6 +585,11 @@ def construir_tabla_simbolos(
         ast_codigo,
         simbolos_externos=simbolos_externos,
     ).construir()
+
+
+def describir_tipo(nodo: SourceASTNode | None) -> str:
+    """Devuelve la representacion canonica de un nodo de tipo de C."""
+    return _describir_tipo(nodo)
 
 
 def _parametros_de_funcion(declaracion: SourceASTNode) -> list[SourceASTNode]:
@@ -497,6 +626,12 @@ def _firma_de_funcion(
     if declaracion_funcion is None:
         return [], False, False
 
+    return _firma_desde_func_decl(declaracion_funcion)
+
+
+def _firma_desde_func_decl(
+    declaracion_funcion: SourceASTNode,
+) -> tuple[list[str], bool, bool]:
     argumentos = _hijo_por_rol(declaracion_funcion, "args")
     if argumentos is None:
         return [], False, False
@@ -504,7 +639,7 @@ def _firma_de_funcion(
     parametros = [
         hijo
         for hijo in argumentos.hijos
-        if hijo.tipo == "Decl"
+        if hijo.tipo in {"Decl", "Typename"}
     ]
     es_variadica = any(
         hijo.tipo == "EllipsisParam"
@@ -558,6 +693,21 @@ def _describir_tipo(nodo: SourceASTNode | None) -> str:
         return f"enum {nombre}"
 
     tipo_interno = _hijo_por_rol(nodo, "type")
+    if nodo.tipo == "PtrDecl" and tipo_interno is not None:
+        if tipo_interno.tipo == "FuncDecl":
+            retorno = _describir_tipo(_hijo_por_rol(tipo_interno, "type"))
+            parametros, firma_definida, es_variadica = (
+                _firma_desde_func_decl(tipo_interno)
+            )
+            descripcion_parametros = list(parametros)
+            if es_variadica:
+                descripcion_parametros.append("...")
+            if firma_definida:
+                contenido = ", ".join(descripcion_parametros) or "void"
+            else:
+                contenido = "no especificados"
+            return f"puntero a funcion ({contenido}) -> {retorno}"
+
     base = _describir_tipo(tipo_interno)
 
     if nodo.tipo == "PtrDecl":
@@ -567,6 +717,14 @@ def _describir_tipo(nodo: SourceASTNode | None) -> str:
     if nodo.tipo == "FuncDecl":
         return f"funcion -> {base}"
     return base
+
+
+def _contiene_puntero_funcion(nodo: SourceASTNode) -> bool:
+    if nodo.tipo == "PtrDecl":
+        interno = _hijo_por_rol(nodo, "type")
+        if interno is not None and interno.tipo == "FuncDecl":
+            return True
+    return any(_contiene_puntero_funcion(hijo) for hijo in nodo.hijos)
 
 
 def _hijo_por_rol(

@@ -320,3 +320,50 @@ def test_tabla_registra_firma_void_y_prototipo_local(tmp_path):
     assert sumar is not None
     assert sumar.tipos_parametros == ["int", "int"]
     assert "parametros=(int, int)" in "\n".join(tabla.render())
+
+
+def test_tabla_registra_miembros_de_estructuras_y_uniones(tmp_path):
+    fuente = tmp_path / "tipos_compuestos.c"
+    fuente.write_text(
+        "typedef struct { int edad; char *nombre; } Persona;\n"
+        "union Valor { int entero; double decimal; };\n"
+        "int main(void) { Persona persona = {20, \"Ana\"}; "
+        "return persona.edad; }\n",
+        encoding="utf-8",
+    )
+
+    tabla = construir_tabla_simbolos(construir_ast_codigo(str(fuente)))
+
+    assert tabla.buscar_miembro("struct Persona", "edad").tipo_dato == "int"
+    assert tabla.buscar_miembro("struct Persona", "nombre").tipo_dato == "char *"
+    assert tabla.buscar_miembro("union Valor", "decimal").tipo_dato == "double"
+    assert "struct Persona" in tabla.to_dict()["tipos_compuestos"]
+    assert any("edad: int" in linea for linea in tabla.render())
+
+
+def test_tabla_registra_punteros_a_funcion_y_alias_typedef(tmp_path):
+    fuente = tmp_path / "callbacks.c"
+    fuente.write_text(
+        "typedef int (*Operacion)(int, int);\n"
+        "int aplicar(Operacion operacion, int a, int b) {\n"
+        "    return operacion(a, b);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    tabla = construir_tabla_simbolos(construir_ast_codigo(str(fuente)))
+    operacion_tipo = tabla.ambito_global.buscar_local("Operacion")
+    ambito_aplicar = next(
+        ambito
+        for ambito in tabla.todos_los_ambitos()
+        if ambito.clase == "funcion" and ambito.nombre == "aplicar"
+    )
+    operacion = ambito_aplicar.buscar_local("operacion")
+
+    assert operacion_tipo is not None
+    assert operacion_tipo.es_puntero_funcion is True
+    assert operacion_tipo.tipos_parametros == ["int", "int"]
+    assert operacion is not None
+    assert operacion.es_puntero_funcion is True
+    assert operacion.tipo_dato == "puntero a funcion (int, int) -> int"
+    assert operacion.tipos_parametros == ["int", "int"]

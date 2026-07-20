@@ -28,7 +28,10 @@ fileInput.addEventListener("change", () => {
     reader.readAsText(file, "UTF-8");
 });
 
-analysisForm.addEventListener("submit", () => {
+analysisForm.addEventListener("submit", (event) => {
+    if (event.submitter?.id === "download-json") {
+        return;
+    }
     analyzeButton.disabled = true;
     analyzeButton.textContent = "Analizando...";
     analysisForm.setAttribute("aria-busy", "true");

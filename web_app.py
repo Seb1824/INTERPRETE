@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
+from io import BytesIO
 from pathlib import Path
 
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from src.analyzer import AnalysisResult, analizar_archivo
 from src.explainer import explain
 from src.lexer import LexerError
+from src.report import construir_reporte_json
 
 
 MAXIMO_CODIGO_BYTES = 512 * 1024
@@ -103,6 +106,48 @@ def create_app(configuracion: dict | None = None) -> Flask:
             nombre_archivo=nombre_archivo,
             resultado=resultado,
             error=None,
+        )
+
+    @app.post("/descargar-json")
+    def descargar_json():
+        archivo = request.files.get("archivo")
+        codigo_formulario = request.form.get("codigo", "")
+
+        try:
+            nombre_archivo, codigo = _obtener_codigo(
+                archivo,
+                codigo_formulario,
+            )
+            with tempfile.TemporaryDirectory() as directorio:
+                ruta_temporal = Path(directorio) / nombre_archivo
+                ruta_temporal.write_text(codigo, encoding="utf-8")
+                analisis = analizar_archivo(str(ruta_temporal))
+                reporte = construir_reporte_json(
+                    str(ruta_temporal),
+                    analisis.diagnosticos,
+                    ast_codigo=analisis.ast_codigo,
+                    error_ast=analisis.error_ast,
+                    tabla_simbolos=analisis.tabla_simbolos,
+                    archivo_visible=nombre_archivo,
+                )
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except LexerError as exc:
+            return jsonify(error=str(exc)), 503
+        except OSError as exc:
+            return jsonify(error=f"No se pudo generar el reporte: {exc}"), 500
+
+        contenido = json.dumps(
+            reporte,
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
+        nombre_descarga = f"{Path(nombre_archivo).stem}_diagnosticos.json"
+        return send_file(
+            BytesIO(contenido),
+            mimetype="application/json",
+            as_attachment=True,
+            download_name=nombre_descarga,
         )
 
     @app.errorhandler(RequestEntityTooLarge)

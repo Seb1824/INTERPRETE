@@ -62,7 +62,18 @@
                     <h2 id="results-title">Resultados</h2>
                 </div>
                 {% if resultado %}
-                    <span class="analysis-file" title="Archivo analizado">{{ resultado.archivo }}</span>
+                    <div class="result-actions">
+                        <span class="analysis-file" title="Archivo analizado">{{ resultado.archivo }}</span>
+                        <button
+                            id="download-json"
+                            type="submit"
+                            form="analysis-form"
+                            formaction="{{ url_for('descargar_json') }}"
+                            formmethod="post"
+                        >
+                            Descargar JSON
+                        </button>
+                    </div>
                 {% endif %}
             </div>
 

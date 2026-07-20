@@ -554,6 +554,223 @@ def test_semantic_ejemplos_de_reglas_nuevas():
         _buscar_diagnostico(diagnosticos, tipo_esperado)
 
 
+def test_semantic_infiere_tipo_de_miembro_de_estructura(tmp_path):
+    fuente = tmp_path / "miembro_estructura.c"
+    fuente.write_text(
+        "typedef struct { int edad; char *nombre; } Persona;\n"
+        "int longitud(char *texto) { return texto[0]; }\n"
+        "int main(void) {\n"
+        "    Persona persona = {20, \"Ana\"};\n"
+        "    return longitud(persona.edad);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "longitud"
+    assert "recibio 'int'" in argumento.mensaje_crudo
+
+
+def test_semantic_infiere_miembro_mediante_puntero(tmp_path):
+    fuente = tmp_path / "miembro_puntero.c"
+    fuente.write_text(
+        "typedef struct { int edad; char *nombre; } Persona;\n"
+        "int longitud(char *texto) { return texto[0]; }\n"
+        "int revisar(Persona *persona) {\n"
+        "    return longitud(persona->edad);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "longitud"
+    assert argumento.linea == 4
+
+
+def test_semantic_valida_llamada_mediante_puntero_a_funcion(tmp_path):
+    fuente = tmp_path / "puntero_funcion.c"
+    fuente.write_text(
+        "int aplicar(int (*operacion)(int), int valor) {\n"
+        "    return operacion(\"texto\");\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "operacion"
+    assert "argumento 1" in argumento.mensaje_crudo
+
+
+def test_semantic_acepta_funcion_como_callback_compatible(tmp_path):
+    fuente = tmp_path / "callback_correcto.c"
+    fuente.write_text(
+        "int duplicar(int valor) { return valor * 2; }\n"
+        "int aplicar(int (*operacion)(int), int valor) {\n"
+        "    return operacion(valor);\n"
+        "}\n"
+        "int main(void) { return aplicar(duplicar, 4) - 8; }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error in {"wrong_arguments", "type_mismatch"}
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_rechaza_callback_con_firma_incompatible(tmp_path):
+    fuente = tmp_path / "callback_incorrecto.c"
+    fuente.write_text(
+        "double mitad(double valor) { return valor / 2.0; }\n"
+        "int aplicar(int (*operacion)(int), int valor) {\n"
+        "    return operacion(valor);\n"
+        "}\n"
+        "int main(void) { return aplicar(mitad, 4); }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "aplicar"
+    assert argumento.linea == 5
+
+
+def test_semantic_infiere_retorno_de_llamada_anidada(tmp_path):
+    fuente = tmp_path / "llamada_anidada.c"
+    fuente.write_text(
+        "char *crear(void) { return \"texto\"; }\n"
+        "int longitud(char *texto) { return texto[0]; }\n"
+        "int main(void) { return longitud(crear()); }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_detecta_tipo_incorrecto_en_llamada_anidada(tmp_path):
+    fuente = tmp_path / "llamada_anidada_incorrecta.c"
+    fuente.write_text(
+        "int crear_numero(void) { return 7; }\n"
+        "int longitud(char *texto) { return texto[0]; }\n"
+        "int main(void) { return longitud(crear_numero()); }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "longitud"
+    assert "recibio 'int'" in argumento.mensaje_crudo
+
+
+def test_semantic_resuelve_funcion_que_devuelve_callback(tmp_path):
+    fuente = tmp_path / "callback_anidado.c"
+    fuente.write_text(
+        "int incrementar(int valor) { return valor + 1; }\n"
+        "int (*seleccionar(void))(int) { return incrementar; }\n"
+        "int main(void) { return seleccionar()(4) - 5; }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error in {"wrong_arguments", "return_error"}
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_resuelve_alias_dentro_de_firma_callback(tmp_path):
+    fuente = tmp_path / "callback_alias.c"
+    fuente.write_text(
+        "typedef int Numero;\n"
+        "typedef Numero (*Operacion)(Numero);\n"
+        "int duplicar(int valor) { return valor * 2; }\n"
+        "int aplicar(Operacion operacion, Numero valor) {\n"
+        "    return operacion(valor);\n"
+        "}\n"
+        "int main(void) { return aplicar(duplicar, 3) - 6; }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_aplica_promocion_entera_en_expresiones(tmp_path):
+    fuente = tmp_path / "promociones.c"
+    fuente.write_text(
+        "int recibir(int valor) { return valor; }\n"
+        "int main(void) {\n"
+        "    short corto = 2;\n"
+        "    char letra = 3;\n"
+        "    return recibir(corto + letra) - 5;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_detecta_conversion_numerica_con_perdida(tmp_path):
+    fuente = tmp_path / "conversion_compleja.c"
+    fuente.write_text(
+        "int main(void) {\n"
+        "    unsigned char pequeno = 300;\n"
+        "    return pequeno;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    conversion = _buscar_diagnostico(diagnosticos, "dangerous_conversion")
+
+    assert conversion.simbolo == "pequeno"
+    assert "puede perder informacion" in conversion.mensaje_crudo
+
+
+def test_semantic_valida_asignacion_a_miembro_de_estructura(tmp_path):
+    fuente = tmp_path / "asignacion_miembro.c"
+    fuente.write_text(
+        "typedef struct { char *nombre; } Persona;\n"
+        "int main(void) {\n"
+        "    Persona persona = {\"Ana\"};\n"
+        "    persona.nombre = 42;\n"
+        "    return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    incompatibilidad = _buscar_diagnostico(diagnosticos, "type_mismatch")
+
+    assert incompatibilidad.simbolo == "nombre"
+    assert incompatibilidad.linea == 4
+
+
 def _buscar_diagnostico(
     diagnosticos: list[DiagnosticEntry],
     tipo_error: str,

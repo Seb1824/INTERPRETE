@@ -7,71 +7,13 @@ from src.analyzer import combinar_diagnosticos as _combinar_diagnosticos
 from src.explainer import explain
 from src.lexer import Lexer, LexerError
 from src.parser import construir_arbol_diagnostico
-
-
-def _agrupar_diagnosticos_con_notas(diagnosticos):
-    """Adjunta las notas de GCC al diagnostico anterior."""
-    agrupados = []
-
-    for diagnostico in diagnosticos:
-        if diagnostico.severidad == "note" and agrupados:
-            notas_actuales = agrupados[-1][1]
-            if not any(n.mensaje_crudo == diagnostico.mensaje_crudo for n in notas_actuales):
-                notas_actuales.append(diagnostico)
-            continue
-        agrupados.append((diagnostico, []))
-
-    return agrupados
-
-
-def _calcular_resumen_clasificacion(diagnosticos):
-    principales = [
-        diagnostico
-        for diagnostico, _ in _agrupar_diagnosticos_con_notas(diagnosticos)
-    ]
-    total = len(principales)
-    desconocidos = [
-        diagnostico
-        for diagnostico in principales
-        if diagnostico.tipo_error == "desconocido"
-    ]
-    cantidad_desconocidos = len(desconocidos)
-    clasificados = total - cantidad_desconocidos
-    cobertura = (clasificados / total * 100) if total else 100.0
-
-    return {
-        "total": total,
-        "clasificados": clasificados,
-        "desconocidos": cantidad_desconocidos,
-        "cobertura": cobertura,
-        "diagnosticos_desconocidos": desconocidos,
-    }
-
-
-def _obtener_contexto_codigo(diagnostico):
-    ruta = Path(diagnostico.archivo)
-    if not ruta.exists() or diagnostico.linea <= 0:
-        return None
-
-    try:
-        lineas = ruta.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-
-    if diagnostico.linea > len(lineas):
-        return None
-
-    numero = diagnostico.linea
-    codigo = lineas[numero - 1]
-    ancho_linea = len(str(numero))
-    columna = max(diagnostico.columna, 1)
-    marcador = " " * (ancho_linea + 3 + columna - 1) + "^"
-
-    return [
-        f"    Codigo:",
-        f"      {numero} | {codigo}",
-        f"      {' ' * ancho_linea} | {marcador[ancho_linea + 3:]}",
-    ]
+from src.report import (
+    agrupar_diagnosticos_con_notas as _agrupar_diagnosticos_con_notas,
+    calcular_resumen_clasificacion as _calcular_resumen_clasificacion,
+    construir_reporte_json as _construir_reporte_json,
+    normalizar_ruta_json as _normalizar_ruta_json,
+    obtener_contexto_codigo as _obtener_contexto_codigo,
+)
 
 
 def _etiqueta_severidad(severidad: str) -> str:
@@ -81,69 +23,6 @@ def _etiqueta_severidad(severidad: str) -> str:
         "note": "NOTA",
     }
     return etiquetas.get(severidad, severidad.upper())
-
-
-def _normalizar_ruta_json(ruta: str) -> str:
-    """Usa separadores '/' para que el JSON sea portable entre sistemas."""
-    return ruta.replace("\\", "/")
-
-
-def _construir_reporte_json(
-    ruta_fuente: str,
-    diagnosticos,
-    ast_codigo=None,
-    error_ast: str | None = None,
-    tabla_simbolos=None,
-) -> dict:
-    resumen = _calcular_resumen_clasificacion(diagnosticos)
-    elementos = []
-
-    for diagnostico, notas in _agrupar_diagnosticos_con_notas(diagnosticos):
-        mejora = explain(diagnostico)
-        contexto = _obtener_contexto_codigo(diagnostico)
-        arbol = construir_arbol_diagnostico(
-            diagnostico,
-            notas=notas,
-            contexto_codigo=contexto[1:] if contexto else None,
-        )
-        elementos.append(
-            {
-                "archivo": _normalizar_ruta_json(diagnostico.archivo),
-                "linea": diagnostico.linea,
-                "columna": diagnostico.columna,
-                "severidad": diagnostico.severidad,
-                "etiqueta_severidad": _etiqueta_severidad(diagnostico.severidad),
-                "tipo_error": diagnostico.tipo_error,
-                "origen": diagnostico.origen,
-                "simbolo": diagnostico.simbolo,
-                "mensaje_crudo": diagnostico.mensaje_crudo,
-                "titulo": mejora["titulo"],
-                "explicacion": mejora["explicacion"],
-                "causa_probable": mejora["causa_probable"],
-                "sugerencia": mejora["sugerencia"],
-                "contexto_codigo": contexto[1:] if contexto else [],
-                "notas_gcc": [nota.mensaje_crudo for nota in notas],
-                "arbol_sintactico": arbol.to_dict(),
-            }
-        )
-
-    return {
-        "archivo_fuente": _normalizar_ruta_json(ruta_fuente),
-        "resumen": {
-            "diagnosticos_principales": resumen["total"],
-            "clasificados": resumen["clasificados"],
-            "desconocidos": resumen["desconocidos"],
-            "cobertura_clasificacion": round(resumen["cobertura"], 1),
-        },
-        "diagnosticos": elementos,
-        "ast_codigo": ast_codigo.to_dict() if ast_codigo else None,
-        "error_ast": error_ast,
-        "tabla_simbolos": (
-            tabla_simbolos.to_dict()
-            if tabla_simbolos
-            else None
-        ),
-    }
 
 
 def _exportar_json(
