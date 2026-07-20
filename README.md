@@ -204,8 +204,9 @@ Antes de analizar:
 - expande macros de objeto y de funcion
 - resuelve directivas condicionales e inclusiones locales
 - bloquea las cabeceras reales del sistema con `-nostdinc`
-- utiliza cabeceras controladas para `stddef.h`, `stdbool.h`, `stdint.h`,
-  `stdio.h`, `stdlib.h`, `string.h` y `math.h`
+- utiliza cabeceras controladas para `assert.h`, `ctype.h`, `errno.h`,
+  `float.h`, `limits.h`, `math.h`, `stdarg.h`, `stdbool.h`, `stddef.h`,
+  `stdint.h`, `stdio.h`, `stdlib.h`, `string.h` y `time.h`
 - conserva las coordenadas del archivo principal mediante las marcas de linea
   generadas por el preprocesador
 
@@ -638,6 +639,7 @@ Estructura resumida:
 | `semantico_variable_no_inicializada.c` | Variable usada sin inicializar |
 | `semantico_argumento_tipo_incorrecto.c` | Tipo individual de argumento incompatible |
 | `semantico_preprocesador_controlado.c` | Macros y tipos de cabeceras controladas |
+| `semantico_cabeceras_adicionales.c` | `ctype`, limites, tiempo, aserciones y argumentos variables |
 | `semantico_estructuras_inferencia.c` | Inferencia del tipo de un miembro de estructura |
 | `semantico_puntero_funcion.c` | Callback declarado mediante `typedef` |
 | `semantico_callback_anidado.c` | Funcion que devuelve un puntero a funcion |
@@ -661,7 +663,7 @@ python -m pytest -q
 Ultima verificacion del estado documentado:
 
 ```text
-252 passed
+263 passed
 ```
 
 La cobertura funcional incluye:
@@ -672,7 +674,9 @@ La cobertura funcional incluye:
 - agrupacion de notas
 - parser y arboles de diagnosticos
 - AST del codigo C
-- preprocesamiento de macros, cabeceras locales y cabeceras controladas
+- preprocesamiento de macros, cabeceras locales y 14 cabeceras controladas
+- tipos, constantes y prototipos de `ctype.h`, `time.h` y otras bibliotecas
+- macros de aserciones y manejo de argumentos variables con `stdarg.h`
 - tabla de simbolos y resolucion por ambitos
 - firmas normales, `(void)` y variadicas
 - validacion de cantidad y tipos individuales de argumentos
@@ -744,8 +748,8 @@ diagnostico GCC
   estandar C ni todas las extensiones de GCC.
 - El analisis de flujo de control cubre casos basicos, no todos los caminos de
   `switch`, ciclos, `goto` o construcciones complejas.
-- El preprocesamiento del AST reconoce las cabeceras controladas incluidas en
-  el proyecto y cabeceras locales. Otras cabeceras del sistema requieren un
+- El preprocesamiento del AST reconoce las 14 cabeceras controladas incluidas
+  en el proyecto y cabeceras locales. Otras cabeceras del sistema requieren un
   stub adicional.
 - Macros dependientes de extensiones especificas del compilador pueden producir
   construcciones que `pycparser` no comprenda.
@@ -757,9 +761,7 @@ diagnostico GCC
 
 ## Pendientes recomendados
 
-1. Ampliar las cabeceras controladas para bibliotecas adicionales cuando los
-   nuevos casos de uso lo requieran.
-2. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
+1. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
    de correccion y cobertura de categorias.
-3. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
+2. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
    deja de ser exclusivamente local.

@@ -127,6 +127,90 @@ def test_ast_resuelve_tipos_de_cabeceras_estandar_controladas(tmp_path):
     assert {"activo", "numero", "main"} <= declaraciones
 
 
+def test_ast_resuelve_cabeceras_estandar_adicionales(tmp_path):
+    fuente = tmp_path / "cabeceras_adicionales.c"
+    fuente.write_text(
+        "#include <assert.h>\n"
+        "#include <ctype.h>\n"
+        "#include <errno.h>\n"
+        "#include <float.h>\n"
+        "#include <limits.h>\n"
+        "#include <stdarg.h>\n"
+        "#include <time.h>\n"
+        "int primero(int cantidad, ...) {\n"
+        "    va_list argumentos = (va_list)0;\n"
+        "    va_start(argumentos, cantidad);\n"
+        "    int valor = va_arg(argumentos, int);\n"
+        "    va_end(argumentos);\n"
+        "    return valor;\n"
+        "}\n"
+        "int main(void) {\n"
+        "    time_t ahora = time(NULL);\n"
+        "    int letra = toupper('a');\n"
+        "    double precision = DBL_EPSILON;\n"
+        "    errno = 0;\n"
+        "    assert(INT_MAX > 0);\n"
+        "    return primero(1, letra) + (ahora != (time_t)-1)\n"
+        "        + (precision > 0.0) + errno;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    ast = construir_ast_codigo(str(fuente))
+    nodos = list(_recorrer(ast))
+    declaraciones = {
+        nodo.atributos.get("name")
+        for nodo in nodos
+        if nodo.tipo == "Decl"
+    }
+    typedefs = {
+        nodo.atributos.get("name")
+        for nodo in nodos
+        if nodo.tipo == "Typedef"
+    }
+
+    assert {"toupper", "time", "localtime", "errno"} <= declaraciones
+    assert {"va_list", "time_t", "clock_t"} <= typedefs
+    assert {"primero", "main", "ahora", "letra", "precision"} <= declaraciones
+    assert any(
+        nodo.tipo == "Struct" and nodo.atributos.get("name") == "tm"
+        for nodo in nodos
+    )
+
+
+@pytest.mark.parametrize(
+    ("cabecera", "identificador"),
+    [
+        ("assert.h", "assert"),
+        ("ctype.h", "isdigit"),
+        ("errno.h", "errno"),
+        ("float.h", "DBL_MAX"),
+        ("limits.h", "INT_MAX"),
+        ("stdarg.h", "va_list"),
+        ("time.h", "time_t"),
+    ],
+)
+def test_ast_acepta_cada_cabecera_adicional(
+    tmp_path,
+    cabecera,
+    identificador,
+):
+    fuente = tmp_path / "cabecera_individual.c"
+    fuente.write_text(
+        f"#include <{cabecera}>\n"
+        "int main(void) { return 0; }\n",
+        encoding="utf-8",
+    )
+
+    ast = construir_ast_codigo(str(fuente))
+    representacion = "\n".join(ast.render())
+
+    assert (
+        identificador in representacion
+        or cabecera in {"assert.h", "float.h", "limits.h"}
+    )
+
+
 def test_ast_integra_typedef_y_prototipo_de_cabecera_local(tmp_path):
     cabecera = tmp_path / "calculos.h"
     cabecera.write_text(

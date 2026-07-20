@@ -459,6 +459,64 @@ def test_semantic_usa_respaldo_textual_si_ast_es_invalido(tmp_path):
     _buscar_diagnostico(diagnosticos, "assignment_in_condition")
 
 
+def test_semantic_usa_firma_de_ctype_para_validar_argumento(tmp_path):
+    fuente = tmp_path / "ctype_argumento.c"
+    fuente.write_text(
+        "#include <ctype.h>\n"
+        "int main(void) { return isdigit(\"123\"); }\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    argumento = _buscar_diagnostico(diagnosticos, "wrong_arguments")
+
+    assert argumento.simbolo == "isdigit"
+    assert "espera 'int'" in argumento.mensaje_crudo
+    assert "recibio 'char *'" in argumento.mensaje_crudo
+
+
+def test_semantic_infiere_llamadas_anidadas_de_time(tmp_path):
+    fuente = tmp_path / "time_anidado.c"
+    fuente.write_text(
+        "#include <time.h>\n"
+        "int main(void) {\n"
+        "    double segundos = difftime(time(NULL), time(NULL));\n"
+        "    return segundos > 0.0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    analizador = SemanticAnalyzer(str(fuente))
+    diagnosticos = analizador.analizar()
+
+    assert analizador.error_ast is None
+    assert not any(
+        diagnostico.tipo_error == "wrong_arguments"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_conserva_uso_de_variable_dentro_de_assert(tmp_path):
+    fuente = tmp_path / "assert_variable.c"
+    fuente.write_text(
+        "#include <assert.h>\n"
+        "int main(void) {\n"
+        "    int positivo = 1;\n"
+        "    assert(positivo > 0);\n"
+        "    return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "unused_variable"
+        and diagnostico.simbolo == "positivo"
+        for diagnostico in diagnosticos
+    )
+
+
 def test_combinar_diagnosticos_evita_duplicados_por_tipo_y_simbolo():
     gcc = DiagnosticEntry(
         archivo="programa.c",
