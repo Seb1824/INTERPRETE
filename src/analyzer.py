@@ -118,9 +118,35 @@ def _diagnosticos_equivalentes(
         "type_mismatch",
         "wrong_arguments",
     }
-    return (
+    if (
         diagnostico_semantico.tipo_error == "wrong_arguments"
         and diagnostico_gcc.tipo_error in categorias_argumento_gcc
+        and misma_linea
+        and mismo_simbolo
+    ):
+        return True
+
+    categorias_conversion = {
+        "dangerous_conversion",
+        "pointer_error",
+        "type_mismatch",
+    }
+    if (
+        diagnostico_gcc.tipo_error in categorias_conversion
+        and diagnostico_semantico.tipo_error in categorias_conversion
+        and misma_linea
+        and mismo_simbolo
+    ):
+        return True
+
+    categorias_retorno = {
+        "dangerous_conversion",
+        "return_error",
+        "type_mismatch",
+    }
+    return (
+        diagnostico_gcc.tipo_error in categorias_retorno
+        and diagnostico_semantico.tipo_error in categorias_retorno
         and misma_linea
         and mismo_simbolo
     )

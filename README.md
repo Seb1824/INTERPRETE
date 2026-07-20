@@ -318,7 +318,9 @@ mostrar resultados, `src/analyzer.py` normaliza rutas y elimina duplicados por:
 
 Para argumentos incompatibles tambien reconoce como equivalentes las
 categorias relacionadas de GCC (`type_mismatch`, `pointer_error` y
-`dangerous_conversion`) y la regla semantica `wrong_arguments`.
+`dangerous_conversion`) y la regla semantica `wrong_arguments`. La misma
+normalizacion evita duplicados entre conversiones, errores de puntero y
+retornos incompatibles cuando coinciden la linea y el simbolo.
 
 Cuando GCC ya tiene el diagnostico equivalente, se conserva el mensaje de GCC
 y no se agrega una segunda tarjeta semantica.
@@ -664,7 +666,7 @@ python -m pytest -q
 Ultima verificacion del estado documentado:
 
 ```text
-265 passed
+271 passed
 ```
 
 La cobertura funcional incluye:

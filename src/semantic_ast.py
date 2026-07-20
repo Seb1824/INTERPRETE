@@ -475,6 +475,7 @@ class ASTSemanticAnalyzer:
             cuerpo = _hijo_por_rol(funcion, "body")
             if cuerpo is None:
                 continue
+            padres = _construir_mapa_padres(cuerpo)
 
             for decl in _buscar_nodos(cuerpo, "Decl"):
                 nombre = decl.atributos.get("name")
@@ -495,21 +496,15 @@ class ASTSemanticAnalyzer:
                         continue
                     if uso.linea <= decl.linea:
                         continue
+                    if not _es_lectura_identificador(uso, padres):
+                        continue
 
-                    asignada = False
-                    for asignacion in _buscar_nodos(cuerpo, "Assignment"):
-                        lvalue = _hijo_por_rol(asignacion, "lvalue")
-                        if lvalue is None:
-                            continue
-                        if lvalue.atributos.get("name") != nombre:
-                            continue
-                        if asignacion.linea is None:
-                            continue
-                        if asignacion.linea < uso.linea:
-                            asignada = True
-                            break
-
-                    if not asignada:
+                    if not _tiene_asignacion_previa(
+                        cuerpo,
+                        nombre,
+                        uso,
+                        padres,
+                    ):
                         diagnosticos.append(
                             self._crear_diagnostico(
                                 nodo=uso,
@@ -729,6 +724,86 @@ def _nombre_expresion(nodo: SourceASTNode) -> str | None:
         base = _hijo_por_rol(nodo, "name")
         return _nombre_expresion(base) if base else None
     return None
+
+
+def _construir_mapa_padres(
+    nodo: SourceASTNode,
+) -> dict[int, SourceASTNode]:
+    padres = {}
+    for hijo in nodo.hijos:
+        padres[id(hijo)] = nodo
+        padres.update(_construir_mapa_padres(hijo))
+    return padres
+
+
+def _es_lectura_identificador(
+    uso: SourceASTNode,
+    padres: dict[int, SourceASTNode],
+) -> bool:
+    padre = padres.get(id(uso))
+    if padre is None:
+        return True
+
+    if (
+        padre.tipo == "Assignment"
+        and uso.rol == "lvalue"
+        and padre.atributos.get("op") == "="
+    ):
+        return False
+
+    if padre.tipo == "UnaryOp" and padre.atributos.get("op") == "&":
+        return False
+
+    return True
+
+
+def _tiene_asignacion_previa(
+    cuerpo: SourceASTNode,
+    nombre: str,
+    uso: SourceASTNode,
+    padres: dict[int, SourceASTNode],
+) -> bool:
+    for asignacion in _buscar_nodos(cuerpo, "Assignment"):
+        if asignacion.atributos.get("op") != "=":
+            continue
+        lvalue = _hijo_por_rol(asignacion, "lvalue")
+        if lvalue is None or lvalue.tipo != "ID":
+            continue
+        if lvalue.atributos.get("name") != nombre:
+            continue
+        if not _nodo_aparece_antes(asignacion, uso):
+            continue
+
+        rvalue = _hijo_por_rol(asignacion, "rvalue")
+        if rvalue is not None and _es_descendiente_de(uso, rvalue, padres):
+            continue
+        return True
+
+    return False
+
+
+def _nodo_aparece_antes(
+    primero: SourceASTNode,
+    segundo: SourceASTNode,
+) -> bool:
+    if primero.linea is None or segundo.linea is None:
+        return False
+    if primero.linea != segundo.linea:
+        return primero.linea < segundo.linea
+    return (primero.columna or 0) < (segundo.columna or 0)
+
+
+def _es_descendiente_de(
+    nodo: SourceASTNode,
+    ancestro: SourceASTNode,
+    padres: dict[int, SourceASTNode],
+) -> bool:
+    actual = padres.get(id(nodo))
+    while actual is not None:
+        if actual is ancestro:
+            return True
+        actual = padres.get(id(actual))
+    return False
 
 
 def _nombre_y_declaracion_funcion(

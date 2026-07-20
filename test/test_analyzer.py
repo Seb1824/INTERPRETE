@@ -43,3 +43,29 @@ def test_analizador_deduplica_tipo_incorrecto_de_argumento():
             and diagnostico.simbolo == "longitud"
         ]
     ) == 1
+
+
+def test_analizador_deduplica_conversion_de_puntero_equivalente():
+    resultado = analizar_archivo("examples/arbol_b_mas_con_errores.c")
+
+    diagnosticos = [
+        diagnostico
+        for diagnostico in resultado.diagnosticos
+        if diagnostico.simbolo == "nodo_incorrecto"
+    ]
+
+    assert len(diagnosticos) == 1
+    assert diagnosticos[0].tipo_error == "pointer_error"
+
+
+def test_analizador_deduplica_retorno_incompatible_equivalente():
+    resultado = analizar_archivo("examples/arbol_b_mas_con_errores.c")
+
+    diagnosticos = [
+        diagnostico
+        for diagnostico in resultado.diagnosticos
+        if diagnostico.simbolo == "retornar_codigo_incorrecto"
+    ]
+
+    assert len(diagnosticos) == 1
+    assert diagnosticos[0].tipo_error == "type_mismatch"

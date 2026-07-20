@@ -98,6 +98,15 @@ def test_lexer_clasifica_unused_variable_real_de_gcc():
     assert _tipo_error_desde_linea(linea) == "unused_variable"
 
 
+def test_lexer_clasifica_variable_asignada_pero_no_usada():
+    linea = (
+        "examples\\acceso_estructura.c:6:20: warning: variable 'persona' "
+        "set but not used [-Wunused-but-set-variable]"
+    )
+
+    assert _tipo_error_desde_linea(linea) == "unused_variable"
+
+
 def test_lexer_no_usa_tipo_c_como_simbolo():
     from src.lexer import _tokenizar_linea
 

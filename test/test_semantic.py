@@ -810,6 +810,70 @@ def test_semantic_detecta_conversion_numerica_con_perdida(tmp_path):
     assert "puede perder informacion" in conversion.mensaje_crudo
 
 
+def test_semantic_no_confunde_asignacion_con_lectura_no_inicializada(tmp_path):
+    fuente = tmp_path / "asignacion_previa.c"
+    fuente.write_text(
+        "int main(void) {\n"
+        "    int numero;\n"
+        "    numero = 7;\n"
+        "    return numero;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "uninitialized_variable"
+        and diagnostico.simbolo == "numero"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_reconoce_asignacion_en_inicializacion_de_for(tmp_path):
+    fuente = tmp_path / "indice_for.c"
+    fuente.write_text(
+        "int main(void) {\n"
+        "    int indice;\n"
+        "    for (indice = 0; indice < 3; indice++) {\n"
+        "    }\n"
+        "    return indice;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+
+    assert not any(
+        diagnostico.tipo_error == "uninitialized_variable"
+        and diagnostico.simbolo == "indice"
+        for diagnostico in diagnosticos
+    )
+
+
+def test_semantic_detecta_lectura_en_lado_derecho_de_primera_asignacion(
+    tmp_path,
+):
+    fuente = tmp_path / "lectura_en_asignacion.c"
+    fuente.write_text(
+        "int main(void) {\n"
+        "    int numero;\n"
+        "    numero = numero + 1;\n"
+        "    return numero;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    diagnosticos = SemanticAnalyzer(str(fuente)).analizar()
+    no_inicializada = _buscar_diagnostico(
+        diagnosticos,
+        "uninitialized_variable",
+    )
+
+    assert no_inicializada.simbolo == "numero"
+    assert no_inicializada.linea == 3
+
+
 def test_semantic_valida_asignacion_a_miembro_de_estructura(tmp_path):
     fuente = tmp_path / "asignacion_miembro.c"
     fuente.write_text(

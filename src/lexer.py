@@ -165,7 +165,13 @@ _PATRONES_TIPO = [
         'type_mismatch',
     ),
     (re.compile(r'too (few|many) argument', re.IGNORECASE),           'wrong_arguments'),
-    (re.compile(r'unused variable|unused parameter', re.IGNORECASE),  'unused_variable'),
+    (
+        re.compile(
+            r'unused variable|unused parameter|variable .* set but not used',
+            re.IGNORECASE,
+        ),
+        'unused_variable',
+    ),
     (
         re.compile(
             r'return type|return value|return.*with a value|function returning void',
