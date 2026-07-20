@@ -16,7 +16,7 @@ estatico educativo y un transformador de diagnosticos que combina:
 - Un lexer propio para tokenizar la salida de GCC.
 - Un parser propio para construir diagnosticos estructurados.
 - Un AST real del codigo C construido con `pycparser`.
-- Una tabla de simbolos propia con ambitos lexicos.
+- Una tabla de simbolos propia con ambitos lexicos y firmas de funciones.
 - Reglas de analisis semantico desarrolladas en el proyecto.
 - Un generador de explicaciones pedagogicas en espanol.
 - Salidas para terminal, JSON e interfaz web.
@@ -80,8 +80,12 @@ todos los productos intermedios y finales.
 - Eliminacion automatica del objeto temporal.
 - Captura completa de `stderr`.
 - Tiempo maximo de ejecucion de GCC de 10 segundos.
-- Configuracion de GCC en ingles para mantener estable la clasificacion.
+- Configuracion de GCC en ingles mediante `LC_ALL=C` y `LANG=C` para
+  mantener estables los patrones de clasificacion del lexer con
+  independencia del sistema operativo del usuario.
 - Manejo controlado de GCC ausente, timeout y errores de ejecucion.
+- Extraccion del nombre de la funcion desde el contexto `In function`
+  de GCC para enriquecer el simbolo de errores de retorno y tipos.
 
 El programa del estudiante nunca se ejecuta. GCC solo lo compila con `-c` para
 obtener diagnosticos.
@@ -143,9 +147,11 @@ Tambien cuenta con reglas especificas para obtener:
 - operando de una desreferencia incorrecta
 - miembro inexistente de una estructura
 - funcion con argumentos incorrectos
-- funcion sin retorno
+- funcion sin retorno o con retorno incompatible
 - archivo de cabecera faltante
 - especificador de formato incorrecto
+- nombre de funcion extraido del contexto `In function` de GCC para
+  errores de tipo en sentencias `return`
 
 Por ejemplo, para:
 
@@ -230,6 +236,7 @@ Registra:
 - ubicacion de la declaracion
 - ubicaciones de cada uso
 - cantidad de usos
+- firma de funciones: lista de tipos de parametros para validar llamadas
 
 La resolucion de un identificador comienza en el ambito actual y continua
 hacia sus padres. Esto permite manejar correctamente el sombreado de variables.
@@ -257,6 +264,10 @@ depender exclusivamente de GCC:
 - funciones no `void` que pueden terminar sin retornar
 - declaracion `void main`
 - uso de funciones conocidas de entrada/salida sin incluir `<stdio.h>`
+- incompatibilidad de tipos en asignaciones e inicializaciones
+- incompatibilidad entre el tipo declarado de retorno y el valor retornado
+- cantidad incorrecta de argumentos en llamadas a funciones
+- variables locales usadas antes de recibir un valor
 
 La evaluacion de constantes soporta numeros, operadores unarios, sumas,
 restas, multiplicaciones, divisiones, modulo y conversiones simples.
@@ -348,7 +359,7 @@ COMPILADOR/
 |   |-- parser.py              # Diagnosticos y arbol de diagnostico
 |   |-- semantic.py            # Coordinador y respaldo textual
 |   |-- semantic_ast.py        # Reglas semanticas sobre el AST
-|   |-- symbol_table.py        # Tabla de simbolos y ambitos
+|   |-- symbol_table.py        # Tabla de simbolos, ambitos y firmas
 |   `-- token.py               # Tipos de token
 |-- templates/
 |   `-- index.html             # Vista principal de la interfaz
@@ -577,6 +588,9 @@ Estructura resumida:
 | `semantico_falta_stdio.c` | Funcion de E/S sin `<stdio.h>` |
 | `semantico_asignacion.c` | Asignacion dentro de condicion |
 | `semantico_void_main.c` | Declaracion `void main` |
+| `semantico_tipos_asignacion.c` | Tipos incompatibles en asignacion |
+| `semantico_retorno_incompatible.c` | Tipo de retorno incompatible |
+| `semantico_variable_no_inicializada.c` | Variable usada sin inicializar |
 
 Ejecutar cualquier ejemplo:
 
@@ -608,9 +622,13 @@ La cobertura funcional incluye:
 - AST del codigo C
 - limpieza de comentarios y directivas
 - tabla de simbolos y resolucion por ambitos
+- firmas de funciones y validacion de cantidad de argumentos
 - sombreado y redeclaraciones
 - usos no resueltos
 - reglas semanticas AST y respaldo textual
+- deteccion de tipos incompatibles en asignaciones e inicializaciones
+- deteccion de tipo de retorno incompatible con la declaracion
+- deteccion de variables usadas sin inicializar
 - deduplicacion GCC/semantico
 - explicaciones para todas las categorias
 - contexto del codigo fuente
@@ -630,7 +648,7 @@ objetivo no sea generar codigo ejecutable:
 | Analisis lexico | Tokenizacion de `stderr` de GCC en `src/lexer.py` |
 | Analisis sintactico de diagnosticos | `DiagnosticEntry` y arbol de diagnostico en `src/parser.py` |
 | Analisis sintactico de C | AST mediante `pycparser` en `src/ast_builder.py` |
-| Tabla de simbolos | Ambitos y resolucion en `src/symbol_table.py` |
+| Tabla de simbolos | Ambitos, firmas y resolucion en `src/symbol_table.py` |
 | Analisis semantico | Reglas AST en `src/semantic_ast.py` |
 | Presentacion de errores | Explicaciones en `src/explainer.py` |
 
@@ -662,10 +680,12 @@ diagnostico GCC
 - Solo analiza codigo C.
 - Requiere GCC instalado localmente.
 - La clasificacion depende de patrones de mensajes de GCC en ingles.
-- No implementa un sistema de tipos completo independiente de GCC.
-- No comprueba todavia todos los tipos de argumentos, asignaciones y retornos.
+- El analisis de tipos es parcial: cubre asignaciones, inicializaciones y
+  retornos simples, pero no expresiones aritmeticas complejas ni llamadas
+  anidadas.
 - El analisis de flujo de control cubre casos basicos, no todos los caminos de
   `switch`, ciclos, `goto` o construcciones complejas.
+- La validacion de argumentos comprueba cantidad pero no tipos individuales.
 - `pycparser` no ejecuta el preprocesador real; las directivas se reemplazan
   para construir el AST.
 - Macros y tipos definidos exclusivamente en cabeceras pueden impedir un AST
@@ -680,13 +700,11 @@ diagnostico GCC
 
 1. Agregar sintesis de voz con controles para escuchar, pausar y detener cada
    diagnostico.
-2. Completar comprobacion propia de tipos en asignaciones e inicializaciones.
-3. Registrar firmas de funciones y validar cantidad y tipos de argumentos.
-4. Verificar compatibilidad del valor retornado con el tipo de la funcion.
-5. Ampliar analisis de flujo para variables posiblemente no inicializadas.
-6. Integrar un preprocesamiento controlado para macros y cabeceras complejas.
-7. Permitir descargar el reporte JSON desde la interfaz web.
-8. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
+2. Validar tipos individuales de argumentos en llamadas a funciones, no solo
+   la cantidad.
+3. Integrar un preprocesamiento controlado para macros y cabeceras complejas.
+4. Permitir descargar el reporte JSON desde la interfaz web.
+5. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
    de correccion y cobertura de categorias.
-9. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
+6. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
    deja de ser exclusivamente local.
