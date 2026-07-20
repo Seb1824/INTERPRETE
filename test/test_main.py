@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from src.analyzer import analizar_archivo
 from src.lexer import CompilerNotFoundError
 from main import _agrupar_diagnosticos_con_notas
 from main import _calcular_resumen_clasificacion
@@ -77,6 +78,42 @@ def test_run_pipeline_modo_estudiante_oculta_salida_tecnica(capsys):
     assert "Cobertura de clasificacion:" in salida
     assert "[ERROR]" in salida
     assert "[ADVERTENCIA]" in salida
+
+
+def test_ejemplo_arbol_b_mas_clasifica_errores_intencionales():
+    resultado = analizar_archivo("examples/arbol_b_mas_con_errores.c")
+    principales = [
+        diagnostico
+        for diagnostico in resultado.diagnosticos
+        if diagnostico.severidad != "note"
+    ]
+    categorias = {diagnostico.tipo_error for diagnostico in principales}
+
+    assert resultado.ast_codigo is not None
+    assert resultado.error_ast is None
+    assert {
+        "dangerous_conversion",
+        "division_by_zero",
+        "format_mismatch",
+        "missing_return",
+        "pointer_error",
+        "redeclaration",
+        "struct_access",
+        "type_mismatch",
+        "undeclared",
+        "uninitialized_variable",
+        "unused_variable",
+        "wrong_arguments",
+    } <= categorias
+    assert all(
+        diagnostico.tipo_error != "desconocido"
+        for diagnostico in principales
+    )
+    assert resultado.tabla_simbolos is not None
+    assert not any(
+        uso.nombre in {"rand", "srand"}
+        for uso in resultado.tabla_simbolos.usos_no_resueltos
+    )
 
 
 def test_run_pipeline_modo_debug_muestra_salida_tecnica(capsys):

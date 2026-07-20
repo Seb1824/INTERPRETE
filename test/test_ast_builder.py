@@ -178,6 +178,24 @@ def test_ast_resuelve_cabeceras_estandar_adicionales(tmp_path):
     )
 
 
+def test_ast_incluye_rand_y_srand_desde_stdlib(tmp_path):
+    fuente = tmp_path / "aleatorios.c"
+    fuente.write_text(
+        "#include <stdlib.h>\n"
+        "int main(void) { srand(7U); return rand() > 0; }\n",
+        encoding="utf-8",
+    )
+
+    ast = construir_ast_codigo(str(fuente))
+    declaraciones = {
+        nodo.atributos.get("name")
+        for nodo in _recorrer(ast)
+        if nodo.tipo == "Decl"
+    }
+
+    assert {"rand", "srand", "main"} <= declaraciones
+
+
 @pytest.mark.parametrize(
     ("cabecera", "identificador"),
     [

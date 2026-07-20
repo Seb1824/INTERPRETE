@@ -10,6 +10,10 @@ void free(void *pointer);
 int atoi(const char *text);
 long atol(const char *text);
 double atof(const char *text);
+int rand(void);
+void srand(unsigned int seed);
 void exit(int status);
+
+#define RAND_MAX 2147483647
 
 #endif

@@ -640,6 +640,7 @@ Estructura resumida:
 | `semantico_argumento_tipo_incorrecto.c` | Tipo individual de argumento incompatible |
 | `semantico_preprocesador_controlado.c` | Macros y tipos de cabeceras controladas |
 | `semantico_cabeceras_adicionales.c` | `ctype`, limites, tiempo, aserciones y argumentos variables |
+| `arbol_b_mas_con_errores.c` | Programa C extenso con errores intencionales variados |
 | `semantico_estructuras_inferencia.c` | Inferencia del tipo de un miembro de estructura |
 | `semantico_puntero_funcion.c` | Callback declarado mediante `typedef` |
 | `semantico_callback_anidado.c` | Funcion que devuelve un puntero a funcion |
@@ -663,7 +664,7 @@ python -m pytest -q
 Ultima verificacion del estado documentado:
 
 ```text
-263 passed
+265 passed
 ```
 
 La cobertura funcional incluye:
