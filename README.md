@@ -360,7 +360,7 @@ La aplicacion Flask esta definida en `web_app.py` y ofrece:
 - limite de entrada de 512 KB
 - validacion de extension y UTF-8
 - procesamiento dentro de un directorio temporal
-- resumen de errores, advertencias y cobertura
+- resumen de errores, advertencias y porcentaje de diagnosticos reconocidos
 - mensajes mejorados con contexto de codigo
 - notas de GCC asociadas
 - descarga del reporte JSON completo del analisis actual

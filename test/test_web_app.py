@@ -51,6 +51,7 @@ def test_resultado_ofrece_descarga_json(cliente_web):
     contenido = respuesta.get_data(as_text=True)
 
     assert respuesta.status_code == 200
+    assert "Diagnósticos reconocidos" in contenido
     assert 'id="download-json"' in contenido
     assert 'formaction="/descargar-json"' in contenido
 
