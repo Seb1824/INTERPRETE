@@ -1,4 +1,5 @@
 const codeInput = document.querySelector("#codigo");
+const lineNumbers = document.querySelector("#line-numbers");
 const fileInput = document.querySelector("#archivo");
 const characterCount = document.querySelector("#character-count");
 const fileName = document.querySelector("#editor-status");
@@ -10,8 +11,26 @@ function updateCharacterCount() {
     characterCount.textContent = `${total.toLocaleString("es")} caracteres`;
 }
 
-codeInput.addEventListener("input", updateCharacterCount);
-updateCharacterCount();
+function updateLineNumbers() {
+    const totalLines = codeInput.value.split("\n").length;
+    lineNumbers.textContent = Array.from(
+        { length: totalLines },
+        (_, index) => index + 1,
+    ).join("\n");
+}
+
+function updateEditorMetrics() {
+    updateCharacterCount();
+    updateLineNumbers();
+}
+
+function syncLineNumberScroll() {
+    lineNumbers.scrollTop = codeInput.scrollTop;
+}
+
+codeInput.addEventListener("input", updateEditorMetrics);
+codeInput.addEventListener("scroll", syncLineNumberScroll);
+updateEditorMetrics();
 
 fileInput.addEventListener("change", () => {
     const [file] = fileInput.files;
@@ -23,7 +42,7 @@ fileInput.addEventListener("change", () => {
     const reader = new FileReader();
     reader.addEventListener("load", () => {
         codeInput.value = String(reader.result ?? "");
-        updateCharacterCount();
+        updateEditorMetrics();
     });
     reader.readAsText(file, "UTF-8");
 });

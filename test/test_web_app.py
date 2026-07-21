@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +23,24 @@ def test_inicio_muestra_editor_y_formulario_accesible(cliente_web):
     assert 'name="codigo"' in contenido
     assert 'name="archivo"' in contenido
     assert 'href="#contenido-principal"' in contenido
+
+
+def test_editor_incluye_numeros_de_linea(cliente_web):
+    respuesta = cliente_web.get("/")
+    contenido = respuesta.get_data(as_text=True)
+
+    assert respuesta.status_code == 200
+    assert 'class="code-editor"' in contenido
+    assert 'id="line-numbers"' in contenido
+    assert 'aria-hidden="true"' in contenido
+
+
+def test_javascript_actualiza_y_sincroniza_numeros_de_linea():
+    javascript = Path("static/app.js").read_text(encoding="utf-8")
+
+    assert "function updateLineNumbers()" in javascript
+    assert 'codeInput.addEventListener("input", updateEditorMetrics)' in javascript
+    assert 'codeInput.addEventListener("scroll", syncLineNumberScroll)' in javascript
 
 
 def test_resultado_ofrece_descarga_json(cliente_web):

@@ -39,14 +39,17 @@
                 </div>
 
                 <label class="sr-only" for="codigo">Codigo C para analizar</label>
-                <textarea
-                    id="codigo"
-                    name="codigo"
-                    spellcheck="false"
-                    autocapitalize="off"
-                    autocomplete="off"
-                    aria-describedby="editor-status"
-                >{{ codigo }}</textarea>
+                <div class="code-editor">
+                    <div id="line-numbers" class="line-numbers" aria-hidden="true"></div>
+                    <textarea
+                        id="codigo"
+                        name="codigo"
+                        spellcheck="false"
+                        autocapitalize="off"
+                        autocomplete="off"
+                        aria-describedby="editor-status"
+                    >{{ codigo }}</textarea>
+                </div>
 
                 <div class="editor-actions">
                     <span id="editor-status" class="file-name">{{ nombre_archivo }}</span>

@@ -355,6 +355,7 @@ por color.
 La aplicacion Flask esta definida en `web_app.py` y ofrece:
 
 - editor para escribir o pegar codigo C
+- numeracion de lineas sincronizada con la escritura y el desplazamiento
 - carga de archivos `.c` y `.C`
 - limite de entrada de 512 KB
 - validacion de extension y UTF-8
@@ -702,6 +703,7 @@ La cobertura funcional incluye:
 - rutas web, codigo pegado y carga de archivos
 - descarga web del mismo reporte JSON disponible en CLI
 - validaciones de la interfaz Flask
+- numeracion de lineas del editor web
 - controles web de sintesis de voz
 
 ## Relacion con las etapas de un compilador
