@@ -84,6 +84,30 @@ def test_analiza_codigo_pegado_con_error_sin_duplicar_gcc(cliente_web):
     assert "Usos no resueltos" in contenido
 
 
+def test_muestra_asignacion_en_condicion_en_linea_y_columna_exactas(
+    cliente_web,
+):
+    codigo = (
+        "int main() {\n"
+        "    int vida = 0;\n"
+        "\n"
+        "    if (vida = 100) {\n"
+        "        return 1;\n"
+        "    }\n"
+        "\n"
+        "    return 0;\n"
+        "}\n"
+    )
+
+    respuesta = cliente_web.post("/analizar", data={"codigo": codigo})
+    contenido = respuesta.get_data(as_text=True)
+
+    assert respuesta.status_code == 200
+    assert "linea 4, columna 14" in contenido
+    assert "if (vida = 100)" in contenido
+    assert contenido.count('class="diagnostic diagnostic-warning"') == 1
+
+
 def test_muestra_controles_de_voz_para_los_diagnosticos(cliente_web):
     respuesta = cliente_web.post(
         "/analizar",

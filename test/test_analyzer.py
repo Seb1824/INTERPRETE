@@ -45,6 +45,21 @@ def test_analizador_deduplica_tipo_incorrecto_de_argumento():
     ) == 1
 
 
+def test_analizador_ubica_operador_de_asignacion_en_condicion():
+    resultado = analizar_archivo("examples/semantico_asignacion.c")
+
+    diagnosticos = [
+        diagnostico
+        for diagnostico in resultado.diagnosticos
+        if diagnostico.tipo_error == "assignment_in_condition"
+    ]
+
+    assert len(diagnosticos) == 1
+    assert diagnosticos[0].linea == 4
+    assert diagnosticos[0].columna == 14
+    assert diagnosticos[0].simbolo == "="
+
+
 def test_analizador_deduplica_conversion_de_puntero_equivalente():
     resultado = analizar_archivo("examples/arbol_b_mas_con_errores.c")
 

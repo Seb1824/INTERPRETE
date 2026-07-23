@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from src.ast_builder import SourceASTNode
 from src.lexer import Lexer
@@ -80,14 +80,34 @@ def combinar_diagnosticos(
     combinados = list(gcc_limpios)
 
     for semantico in diagnosticos_semanticos:
-        duplicado = any(
-            _diagnosticos_equivalentes(existente, semantico)
-            for existente in gcc_limpios
-        )
-        if not duplicado:
+        for indice, existente in enumerate(gcc_limpios):
+            if not _diagnosticos_equivalentes(existente, semantico):
+                continue
+
+            combinados[indice] = _fusionar_diagnosticos_equivalentes(
+                existente,
+                semantico,
+            )
+            break
+        else:
             combinados.append(semantico)
 
     return combinados
+
+
+def _fusionar_diagnosticos_equivalentes(
+    diagnostico_gcc: DiagnosticEntry,
+    diagnostico_semantico: DiagnosticEntry,
+) -> DiagnosticEntry:
+    if diagnostico_semantico.tipo_error == "assignment_in_condition":
+        return replace(
+            diagnostico_gcc,
+            linea=diagnostico_semantico.linea,
+            columna=diagnostico_semantico.columna,
+            simbolo=diagnostico_semantico.simbolo or diagnostico_gcc.simbolo,
+        )
+
+    return diagnostico_gcc
 
 
 def _diagnosticos_equivalentes(
