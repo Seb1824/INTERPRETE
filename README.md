@@ -1,4 +1,4 @@
-# Analizador educativo de errores de C
+# Modelo de interpretación semántica de errores de compilación orientado a la accesibilidad educativa
 
 Proyecto orientado a analizar y mejorar los mensajes de error que GCC genera
 al revisar programas escritos en C. El sistema transforma diagnosticos
@@ -6,6 +6,9 @@ tecnicos en explicaciones en espanol dirigidas a estudiantes principiantes.
 
 El proyecto puede utilizarse desde una interfaz de linea de comandos o desde
 una interfaz web local.
+
+> **Estado del proyecto:** version final. El alcance funcional se considera
+> cerrado y no se encuentran planificadas nuevas modificaciones al codigo.
 
 ## Alcance del proyecto
 
@@ -664,10 +667,16 @@ Ejecutar toda la suite:
 python -m pytest -q
 ```
 
-Ultima verificacion del estado documentado:
+Si no se activo el entorno virtual en Windows, puede ejecutarse directamente:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Ultima ejecucion registrada (23 de julio de 2026):
 
 ```text
-271 passed
+275 passed in 21.03s
 ```
 
 La cobertura funcional incluye:
@@ -743,7 +752,7 @@ diagnostico GCC
   -> explicacion pedagogica en espanol
 ```
 
-## Limitaciones actuales
+## Limitaciones del alcance final
 
 - Solo analiza codigo C.
 - Requiere GCC instalado localmente.
@@ -764,9 +773,13 @@ diagnostico GCC
   navegador y el sistema operativo.
 - El sistema propone sugerencias, pero no modifica automaticamente el codigo.
 
-## Pendientes recomendados
+## Estado final
 
-1. Evaluar los mensajes mejorados con estudiantes y medir comprension, tiempo
-   de correccion y cobertura de categorias.
-2. Preparar despliegue con aislamiento y servidor WSGI solo si la aplicacion
-   deja de ser exclusivamente local.
+Esta version representa el cierre del desarrollo. El codigo, las interfaces,
+los ejemplos y la documentacion corresponden al alcance final del proyecto.
+Las limitaciones anteriores se conservan como delimitacion explicita del
+sistema y no como una lista de trabajo pendiente.
+
+Como trabajo futuro de investigacion, fuera del alcance de esta entrega, puede
+evaluarse con estudiantes el efecto de los mensajes mejorados sobre la
+comprension, el tiempo de correccion y la accesibilidad del aprendizaje.
